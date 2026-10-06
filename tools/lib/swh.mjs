@@ -8,7 +8,7 @@ import { HTTP_TIMEOUT_MS } from './runtime.mjs';
 export const SWH_BASE = 'https://archive.softwareheritage.org';
 
 export class SwhError extends Error {
-  /** kind: unauthorized | rate-limited | unavailable | unexpected */
+  /** kind: unauthorized (401) | forbidden (403) | rate-limited | unavailable | unexpected */
   constructor(kind, message, extra = {}) {
     super(message);
     this.kind = kind;
@@ -32,7 +32,8 @@ export function createSwhClient({ token, fetchImpl = globalThis.fetch, base = SW
     } catch (err) {
       throw new SwhError('unavailable', err?.name === 'TimeoutError' ? `no answer within ${timeoutMs / 1000} s` : 'the request failed');
     }
-    if (res.status === 401 || res.status === 403) throw new SwhError('unauthorized', `HTTP ${res.status}`);
+    if (res.status === 401) throw new SwhError('unauthorized', 'HTTP 401');
+    if (res.status === 403) throw new SwhError('forbidden', 'HTTP 403');
     if (res.status === 429) throw new SwhError('rate-limited', 'HTTP 429', { reset: res.headers.get('x-ratelimit-reset') });
     if (res.status >= 500) throw new SwhError('unavailable', `HTTP ${res.status}`);
     let json = null;

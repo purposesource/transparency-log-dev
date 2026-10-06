@@ -3,13 +3,16 @@
 # Heritage to archive the repository. See README.md.
 #
 # Repository variables (Settings > Secrets and variables > Actions > Variables):
-#   PSN_ORIGIN  the public origin, e.g. https://api.purposesource.org (unset = switched off)
+#   PSN_ORIGIN  the public origin, e.g. https://api.purposesource.org (unset = switched off:
+#               both jobs are skipped, and the workflow stays green and does nothing)
 #   PSN_ENV     prod | dev (the key fence: psn-prod- or psn-dev- kids only)
 # Environment "archive" (deployments from main only) holds the secret SWH_TOKEN. Without it the
-# mirror still commits and the Software Heritage part is skipped with a notice.
+# mirror still commits and the Software Heritage part is skipped (on prod: a warning, and red
+# once the first log commit is more than 24 hours old).
 #
 # Hygiene: actions pinned by full commit SHA; no ${{ }} expression of fetched or external
-# content inside a run script (values pass through env:); git push is plain, never forced.
+# content inside a run script (values pass through env:); git push is plain, never forced;
+# each job holds only the permissions it uses.
 
 name: mirror
 
@@ -18,9 +21,7 @@ on:
     - cron: "37 * * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-  issues: write
+permissions: {}
 
 concurrency:
   group: transparency-log-mirror
@@ -28,18 +29,21 @@ concurrency:
 
 jobs:
   mirror:
-    if: github.ref == 'refs/heads/main'
+    if: ${{ github.ref == 'refs/heads/main' && vars.PSN_ORIGIN != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
     steps:
       - name: Check out main with its whole history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
 
       - name: Set up Node.js 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
 
@@ -49,7 +53,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Self-test the verifier
-        run: node --test tests/
+        run: node --test tests/*.test.mjs
 
       - name: Read the log through the edge and commit what grew
         id: mirror
@@ -82,19 +86,21 @@ jobs:
 
   archive:
     needs: mirror
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && vars.PSN_ORIGIN != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: archive
+    permissions:
+      contents: write
     steps:
       - name: Check out main with its whole history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
 
       - name: Set up Node.js 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
 
@@ -108,6 +114,7 @@ jobs:
         env:
           SWH_TOKEN: ${{ secrets.SWH_TOKEN }}
           ORIGIN_URL: ${{ github.server_url }}/${{ github.repository }}
+          PSN_ENV: ${{ vars.PSN_ENV }}
         run: node tools/archive.mjs --repo . --commit
 
       - name: Push the records (plain, never forced)

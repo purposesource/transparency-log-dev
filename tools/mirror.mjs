@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 import { published, sha256Hex } from './lib/canonical.mjs';
 import { evaluate } from './lib/evaluate.mjs';
-import { annotate, getPublic, git, parseArgs, setOutput, stepSummary } from './lib/runtime.mjs';
+import { annotate, getPublic, git, gitTry, parseArgs, setOutput, stepSummary } from './lib/runtime.mjs';
 import { parseJson } from './lib/schema.mjs';
 import { ENVIRONMENTS, MAX_SEGMENT, SERVED_PATHS } from './lib/spec.mjs';
 import { readState } from './lib/state.mjs';
@@ -45,6 +45,46 @@ export async function fetchServed(origin, fetchImpl, now = () => new Date()) {
 }
 
 const iso = (d) => d.toISOString().slice(0, 19) + 'Z';
+
+/**
+ * The clock the cache windows are measured with (lib/evaluate.mjs): the run's fetch time, and
+ * the commit dates of the mirror's own copies, read from git. Git dates are this mirror's own
+ * clock, which is the right one here: the question is how long ago THIS mirror saw the longer
+ * copy.
+ */
+export function gitClock(repo, nowMs) {
+  const seconds = (out) => (/^[0-9]+$/.test(out) ? Number(out) * 1000 : null);
+  const committed = new Map();
+  const held = new Map();
+  return {
+    now: nowMs,
+    /** The commit date of the newest commit that wrote `path`, or null when none did. */
+    committedAt(path) {
+      if (!committed.has(path)) committed.set(path, seconds(gitTry(repo, ['log', '-1', '--format=%ct', '--', path]).out));
+      return committed.get(path);
+    },
+    /**
+     * The commit date from which ct/latest.json has named `segment` or a later one: walking
+     * back from HEAD, the oldest commit before one that named an earlier segment. Only the
+     * commits since the rollover are read, and those latest.json copies are short.
+     */
+    heldSince(segment) {
+      if (held.has(segment)) return held.get(segment);
+      let since = null;
+      const list = gitTry(repo, ['log', '--format=%H %ct', '--', SERVED_PATHS.latest]).out;
+      for (const line of list.split('\n').filter(Boolean)) {
+        const [sha, ct] = line.split(' ');
+        const blob = gitTry(repo, ['cat-file', 'blob', `${sha}:${SERVED_PATHS.latest}`]);
+        if (!blob.ok) break; // the file was removed in that commit
+        const m = /"segment":\s*([0-9]+)/.exec(blob.out.slice(0, 400));
+        if (!m || Number(m[1]) < segment) break;
+        since = seconds(ct);
+      }
+      held.set(segment, since);
+      return since;
+    },
+  };
+}
 
 export function commitMessage(result, origin) {
   const s = result.summary;
@@ -134,12 +174,18 @@ export async function runMirror({
 
   const served = await fetchServed(origin, fetchImpl, now);
   const mirrored = readState(repo);
-  const result = evaluate(mirrored, served, { env });
+  const result = evaluate(mirrored, served, { env, clock: gitClock(repo, Date.parse(served.fetchedAt)) });
 
   for (const n of result.notices) say('notice', n);
   for (const w of result.warnings) say('warning', w);
 
   const out = { outcome: result.outcome, committed: false, incident: false, exitCode: 0, result };
+
+  if (result.outcome === 'misconfigured') {
+    for (const p of result.incidents) say('error', p);
+    out.exitCode = 1;
+    return out;
+  }
 
   if (result.outcome === 'mirror-broken') {
     for (const p of result.incidents) say('error', `the mirror itself fails: ${p}`);

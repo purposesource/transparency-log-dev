@@ -104,4 +104,24 @@ export const SERVED_PATHS = Object.freeze({
 /** The edge routes numbered segments as /ct/(\d{1,6}).json. */
 export const MAX_SEGMENT = 999999;
 
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * How long a served copy SHORTER than the mirrored one may still be a cached older copy,
+ * counted from the moment the mirror committed the longer copy (plan correction 3). After
+ * that, no cache can still hold the older copy, so a shorter copy means the log shrank.
+ *   latest    /ct/latest.json is cached for 300 seconds; two hours leaves room for a late run.
+ *   segment   /ct/{n}.json is cached for a day (s-maxage=86400); 26 hours is the platform's own
+ *             allowance (CtConsistency RolloverAllowance), also used for a segment that
+ *             closed (or went missing) while a later one is already served.
+ *   jwks      /jwks.json is cached for an hour, and for up to a day more while the origin errs
+ *             (stale-if-error=86400).
+ */
+export const CACHE_WINDOW_MS = Object.freeze({
+  latest: 2 * HOUR_MS,
+  segment: 26 * HOUR_MS,
+  rollover: 26 * HOUR_MS,
+  jwks: 25 * HOUR_MS,
+});
+
 export const SHA256_HEX = /^[0-9a-f]{64}$/;

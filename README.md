@@ -23,7 +23,7 @@ log are not copied here.
 | `checkpoints/{…}.swh.json` | The Software Heritage snapshot that holds that checkpoint (see below). |
 | `jwks.json` | The key set, as served at `/jwks.json`. |
 | `incidents/{YYYYMMDDTHHMMSSZ}/` | Evidence of a served log that failed a check (see below). Empty while all is well. |
-| `swh/state.json` | A Software Heritage save request that was still running when a run ended. Not evidence; it only lets the next run continue. |
+| `swh/state.json` | A Software Heritage save request that was still running when a run ended, and when the workflow first asked Software Heritage for the newest commit (the start of the 24-hour rule below). Not evidence; it only lets the next run continue. |
 | `tools/`, `tests/`, `.github/workflows/mirror.yml` | The verifier, its tests, and the workflow that writes this repository. |
 
 File names carry no colon, so the repository can be cloned on Windows. `.gitattributes` says
@@ -46,7 +46,7 @@ git clone https://github.com/purposesource/transparency-log
 cd transparency-log
 node tools/verify.mjs --env prod             # the files as they stand
 node tools/verify.mjs --env prod --history   # and every commit against the one before it
-node --test tests/                           # the verifier's own tests
+node --test tests/*.test.mjs                 # the verifier's own tests
 ```
 
 `verify.mjs` prints `every check holds` and exits 0, or prints each failure and exits 1. A line
@@ -72,8 +72,11 @@ Each file on its own:
   members, and nothing else. Each kid appears once, and each key is a point on P-256.
 - **Nothing in any file is email-shaped or name-shaped.** A value holding an `@` or whitespace
   fails.
-- **Every file is in the byte form the platform publishes:** two-space indentation, LF line
-  ends, one trailing newline, members in the platform's order.
+- **The segments (`ct/{n}.json`, `ct/latest.json`) and the checkpoint artifact are in the byte
+  form the platform publishes:** two-space indentation, LF line ends, one trailing newline,
+  members in the platform's order. So are the `.swh.json` records, which this repository writes
+  itself. `jwks.json` is kept byte for byte as served, but its form is not checked: no hash is
+  taken over its bytes, so only its content is.
 
 The log as a whole:
 
@@ -92,13 +95,16 @@ The checkpoints:
   again.** This is the check that gives a checkpoint its meaning: a validly signed checkpoint
   that commits to a different log fails here. It is re-checked on every run, so it stays true as
   the log grows.
-- The entry at `headSeq` is not later than `asOf`.
+- If the entry at `headSeq` is later than `asOf`, that is printed as a note, never a failure.
+  The platform currently takes `asOf` before it reads the entries, and an entry's time may run
+  up to two minutes ahead, so an honest checkpoint can show this by a little.
 - Taken in order of `asOf`, the checkpoints never commit to an earlier head, and no two share
   an `asOf`. `ct/checkpoint-latest.json` is the newest of them.
 
 With `--history`, it also checks every commit that touched the log against the commit before
 it. Nothing is removed, no checkpoint or record is rewritten, no file goes back to an older
-version, and each step obeys the growth rules below.
+version, no commit holds a file outside the layout above (even one a later commit removed), and
+each step obeys the growth rules below.
 
 ### Re-rendering a segment, and the test vectors
 
@@ -121,16 +127,20 @@ publishes and to test vectors:
   hashes to `da9c24cc2dae9b9ef65b5d92f2ac804aaf9f3f761435d66777188cd7734be415`, which is the
   checkpoint's `headSegmentSha256` (`tests/render.test.mjs`).
 
-Every file the mirror copies must also re-render to its own exact bytes. If the platform ever
-changed its byte form, the mirror would say so on the first run rather than mis-hash quietly.
+Every segment and checkpoint artifact the mirror copies must also re-render to its own exact
+bytes. If the platform ever changed its byte form, the mirror would say so on the first run
+rather than mis-hash quietly.
 
 ### The key set is not the out-of-band key channel
 
 This repository copies the key set the edge serves, and checks checkpoint signatures against
 that copy. Anyone able to substitute both the edge's checkpoint and the edge's key set would
 pass that check, so it shows only that the two agree. What the mirror adds is history. A kid
-never disappears from the key set, a kid's key material never changes, and a new kid is flagged
-in the run. A copy of the set served late from a cache is not mistaken for a key leaving.
+never disappears from the key set, a kid's key material never changes, a key's validity window
+never opens at a different time (a changed `notBefore` would backdate the key), and a new kid is
+flagged in the run. A copy of the set served late from a cache is not mistaken for a key
+leaving, for as long as a cache can hold one (25 hours after the mirror committed the newer
+set), and never when the served set was generated later than the mirrored one.
 
 The out-of-band channel is a different one: the specification provides for the key set to be
 committed, with signed commits, to the public specification repository. Check a key against
@@ -141,15 +151,29 @@ that copy, not against this one.
 - **The log only grows.** Closed segments must be byte-identical to the mirrored copies. The
   open segment must extend the mirrored one. `seq` must run on, the chain must recompute, and
   checkpoint files are never rewritten.
-- **A copy shorter than what is mirrored is a stale read, not a shrinking log.** The edge
-  caches `/ct/latest.json` for five minutes and `/ct/{n}.json` for a day. So a strict prefix of
-  what is mirrored is skipped. Only a copy that is neither a prefix nor an extension is an
+- **A copy shorter than what is mirrored is a stale read only while a cache can explain it.**
+  The edge caches `/ct/latest.json` for five minutes, `/ct/{n}.json` for a day, and `/jwks.json`
+  for an hour (a day more while the origin errs). So a strict prefix of what is mirrored is
+  skipped for 2 hours (`latest.json`), 26 hours (`ct/{n}.json`) or 25 hours (`jwks.json`),
+  counted from the moment the mirror committed the longer copy. After that, no cache can still
+  hold the older copy, and a shorter copy is an incident: the log shrank, or a kid left the key
+  set. A shorter copy whose `generatedAt` is newer than the mirrored one is an incident at once,
+  because it is not an old copy. A copy that is neither a prefix nor an extension is always an
   incident.
 - **Which segments exist is read from `ct/latest.json`'s `segment` field.** The mirror never
-  probes for the next one.
-- **A 404 means "not served now"** (a cache can hold an absence for a while), never an
-  incident. A 5xx or no answer makes the run skip, green, with a warning. Before the edge serves
-  the log at all, every run ends green with the notice "not published at this origin yet".
+  probes for the next one. A segment that closed must be served closed, and a segment the log
+  names must be served at all, within 26 hours of the mirror first seeing a later segment;
+  otherwise it is an incident.
+- **A 404 means "not served now"** (a cache can hold an absence for a while). For a file the
+  mirror already holds, that holds for the same windows; after them, a 404 is an incident (a
+  published file was removed). A 5xx or no answer makes the run skip, green, with a warning.
+  Before the edge serves the log at all, every run ends green with the notice "not published at
+  this origin yet".
+- **A setting error is not an incident.** If the mirror is empty and every key the origin
+  serves is outside this repository's fence (`psn-prod-` here, `psn-dev-` on the dev
+  repository), the repository variables `PSN_ENV` or `PSN_ORIGIN` are wrong. The run goes red,
+  commits nothing and opens no issue. With `PSN_ORIGIN` unset the workflow is switched off: both
+  jobs are skipped and it stays green.
 - **"Changed" means** new entries, a numbered segment that grew, a new checkpoint, or a change
   to the key set. A run that sees only a new `generatedAt` commits nothing. When a run does
   commit, `ct/latest.json` and `jwks.json` are refreshed to the bytes served at that moment.
@@ -207,9 +231,15 @@ For each checkpoint the snapshot holds, the run writes `checkpoints/{name}.swh.j
 as Software Heritage's own revisits.
 
 A record commit is itself saved once more, and that save adds no record, so the loop stops.
-The run goes red if Software Heritage rejects the token (it needs replacing), or if no full
-snapshot holds the newest commit 24 hours after it was made. A rate limit or an outage only
-delays the record.
+The run goes red if Software Heritage refuses the token (401: it expired or was revoked, and
+needs replacing; 403: forbidden, the token lacks permission), or if no full snapshot holds the
+newest commit 24 hours after the workflow first asked Software Heritage for it. That moment is
+kept in `swh/state.json`, so a token added late starts the clock then. A rate limit or an
+outage only delays the record.
+
+Without the token the mirror still commits, and the Software Heritage part is skipped. On the
+production repository each such run warns, and the run goes red once the first log commit is
+more than 24 hours old. On the dev repository it is a notice.
 
 To check a record yourself:
 
@@ -224,9 +254,10 @@ is the checkpoint.
 
 - A ruleset on `main` blocks force pushes and deletion, with nobody exempt. Each run checks that
   the rules are in place and goes red if they are not.
-- The workflow writes with the repository's own `GITHUB_TOKEN`, limited to
-  `contents: write` and `issues: write` on this repository. That token expires when the job ends.
-  Pushes are plain `git push`, never forced, and one run at a time.
+- The workflow writes with the repository's own `GITHUB_TOKEN`. The workflow as a whole is
+  granted nothing; the mirror job gets `contents: write` and `issues: write` on this repository,
+  and the archive job `contents: write` only. That token expires when the job ends. Pushes are
+  plain `git push`, never forced, and one run at a time.
 - Actions are pinned by full commit SHA. The tools have no npm dependencies.
 - The only secret is the Software Heritage token, an environment secret (`SWH_TOKEN` in the
   environment `archive`) that only the archive job can read.
@@ -241,7 +272,11 @@ still served, because the next run reads it. A checkpoint that the edge replaced
 saw it would be missing from `checkpoints/`.
 
 GitHub also switches off the schedule of a public repository after 60 days without activity.
-Each new checkpoint is a commit, which keeps the schedule alive.
+Once the log is served, each new checkpoint is a commit, which keeps the schedule alive. A
+repository whose origin does not serve the log yet makes no commits at all, so GitHub may switch
+its schedule off after 60 days. The production repository is in that position until the
+production edge serves the log (switch 56 of the Association's launch plan); the Association's
+orchestrator re-enables the workflow at switch 56.
 
 ## Specification versions
 

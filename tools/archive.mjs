@@ -3,7 +3,7 @@
 // save this repository after the mirror committed, polls the request, and writes
 // checkpoints/{name}.swh.json beside every checkpoint the archived snapshot holds.
 //
-//   SWH_TOKEN=… ORIGIN_URL=https://github.com/purposesource/transparency-log node tools/archive.mjs [--repo .] [--commit]
+//   SWH_TOKEN=… ORIGIN_URL=https://github.com/purposesource/transparency-log PSN_ENV=prod node tools/archive.mjs [--repo .] [--commit]
 //
 // THE RULES
 //   - What needs archiving is the newest commit that touched ct/, checkpoints/, jwks.json or
@@ -16,10 +16,19 @@
 //     swh/state.json and polled by id on the next run (never by listing every request).
 //   - Loop guard: a commit that adds a record is a new target, so it gets exactly one more
 //     save; that save adds no record, so the loop stops.
-//   - 429: stop, try again next run. 401/403: red, the token needs replacing. Red too when no
-//     full snapshot covers the target 24 hours after it was committed, or when the snapshot's
-//     main is not in this repository's history (history was rewritten: repair nothing).
-//   - No token: the mirror's commits still land; this part is skipped with a notice.
+//   - The 24-hour clock starts when this job FIRST ASKS Software Heritage for the target (the
+//     first save request, or the first attempt that found Software Heritage unreachable), and
+//     is kept as `requestedAt` in swh/state.json across runs. A failed request keeps the clock
+//     running; a save that completed without capturing the newest target restarts it (Software
+//     Heritage works, the log just moved on). Red when no full snapshot covers the target 24
+//     hours after that first ask. A token that arrives late therefore starts the clock then,
+//     not at the commit's date.
+//   - 429: stop, try again next run. 401: red, the token expired or was revoked. 403: red,
+//     forbidden (the token lacks permission). Red too when the snapshot's main is not in this
+//     repository's history (history was rewritten: repair nothing).
+//   - No token: the mirror's commits still land and this part is skipped. On dev that is a
+//     notice. On prod it is a warning on every run, and red once the first log commit is more
+//     than 24 hours old.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -41,21 +50,35 @@ class Diverged extends Error {}
 
 const iso = (ms) => new Date(ms).toISOString().slice(0, 19) + 'Z';
 
+/**
+ * swh/state.json's `pending`: { saveRequestId, target, requestedAt }. `saveRequestId` is the
+ * request in flight, or null when none is (the last one failed, or Software Heritage could
+ * not be reached); `requestedAt` is when this job first asked for the target, the start of
+ * the 24-hour clock.
+ */
 function readPending(repo) {
   const file = join(repo, STATE_FILE);
   if (!existsSync(file)) return null;
   try {
     const p = JSON.parse(readFileSync(file, 'utf8')).pending;
-    return p && Number.isSafeInteger(p.saveRequestId) && /^[0-9a-f]{40}$/.test(p.target) ? p : null;
+    if (!p || !/^[0-9a-f]{40}$/.test(p.target) || !(p.saveRequestId === null || Number.isSafeInteger(p.saveRequestId))) return null;
+    return { saveRequestId: p.saveRequestId, target: p.target, requestedAt: isDateTime(p.requestedAt) ? p.requestedAt : null };
   } catch {
     return null;
   }
+}
+
+/** The commit date of the first commit that touched the log, or null. */
+function firstLogCommitAt(repo) {
+  const first = gitTry(repo, ['log', '--reverse', '--format=%ct', '--', ...ARCHIVED_PATHS]).out.split('\n')[0];
+  return /^[0-9]+$/.test(first ?? '') ? Number(first) * 1000 : null;
 }
 
 export async function runArchive({
   repo = '.',
   originUrl,
   token,
+  env = 'dev',
   fetchImpl = globalThis.fetch,
   now = () => Date.now(),
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -68,8 +91,19 @@ export async function runArchive({
   const out = { status: 'skipped', committed: false, red: false, records: [], requests: 0 };
 
   if (!token) {
-    say('notice', 'SWH_TOKEN is not set: the Software Heritage save is skipped and stays pending; the mirror\'s commits are unaffected');
     out.status = 'no-token';
+    const first = env === 'prod' ? firstLogCommitAt(repo) : null;
+    if (first === null) {
+      say('notice', 'SWH_TOKEN is not set: the Software Heritage save is skipped and stays pending; the mirror\'s commits are unaffected');
+      return out;
+    }
+    const due = first + STALE_AFTER_MS;
+    if (now() > due) {
+      say('error', `SWH_TOKEN is not set, and the first log commit (${iso(first)}) is more than 24 hours old: Software Heritage is not archiving this repository. Store the token as the environment secret SWH_TOKEN of the environment "archive".`);
+      out.red = true;
+    } else {
+      say('warning', `SWH_TOKEN is not set: Software Heritage is not asked to archive this repository. If it is still missing at ${iso(due)} (24 hours after the first log commit), the run turns red.`);
+    }
     return out;
   }
   if (!/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(originUrl ?? '')) {
@@ -89,6 +123,9 @@ export async function runArchive({
   let pending = committedPending;
   let covered = false;
   let snapshotUsed = null;
+  // The 24-hour clock (see THE RULES): when this job first asked for the target.
+  let since = committedPending?.requestedAt ? Date.parse(committedPending.requestedAt) : null;
+  const waiting = () => ({ saveRequestId: null, target: pending?.target ?? target, requestedAt: iso(since ?? now()) });
 
   const known = (sha) => gitTry(repo, ['cat-file', '-e', `${sha}^{commit}`]).ok;
   const ancestor = (a, b) => a === b || gitTry(repo, ['merge-base', '--is-ancestor', a, b]).ok;
@@ -130,8 +167,8 @@ export async function runArchive({
   };
 
   try {
-    let save = pending ? await client.getSave(pending.saveRequestId) : null;
-    if (pending && !save) pending = null;
+    let save = pending?.saveRequestId != null ? await client.getSave(pending.saveRequestId) : null;
+    if (pending && !save) pending = waiting(); // no request in flight (or one Software Heritage forgot); the clock runs on
 
     // Covered already? Any full visit counts: one made by our request, by the optional
     // webhook, by Software Heritage's own revisits, or by a request whose id was lost.
@@ -162,7 +199,8 @@ export async function runArchive({
         }
         save = await client.requestSave(originUrl);
         out.requests++;
-        pending = { saveRequestId: save.id, target, requestedAt: iso(now()) };
+        if (since === null) since = now();
+        pending = { saveRequestId: save.id, target, requestedAt: iso(since) };
         say('notice', `asked Software Heritage to save ${originUrl} (save request ${save.id}) for ${target}`);
       }
       const state = saveOutcome(save, now());
@@ -187,12 +225,13 @@ export async function runArchive({
         say('notice', `save request ${save.id} finished without capturing ${target}; one new request`);
         save = null;
         pending = null;
+        since = null; // a save completed, so Software Heritage works: the clock restarts with the next request
         continue;
       }
       if (state === 'failed') {
         say('notice', `save request ${save.id} ended without a full visit; one new request`);
         save = null;
-        pending = null;
+        pending = { saveRequestId: null, target, requestedAt: iso(since ?? now()) };
         continue;
       }
       if (now() + pollIntervalMs > deadline) {
@@ -201,7 +240,7 @@ export async function runArchive({
       }
       await sleep(pollIntervalMs);
       save = await client.getSave(save.id);
-      if (!save) pending = null;
+      if (!save) pending = waiting();
     }
   } catch (err) {
     if (err instanceof Diverged) {
@@ -212,6 +251,10 @@ export async function runArchive({
       say('error', `Software Heritage refused the token (${err.message}): it has expired or was revoked. Make a new token on the Software Heritage account page and store it as the environment secret SWH_TOKEN of the environment "archive".`);
       out.red = true;
       out.status = 'unauthorized';
+    } else if (err instanceof SwhError && err.kind === 'forbidden') {
+      say('error', `Software Heritage answered ${err.message}: forbidden (token lacks permission) for this call, or the origin is refused. Check the token's account and the origin URL; this does not mean the token expired.`);
+      out.red = true;
+      out.status = 'forbidden';
     } else if (err instanceof SwhError && err.kind === 'rate-limited') {
       const reset = Number(err.reset);
       say('notice', `Software Heritage answered 429 (rate limited${Number.isFinite(reset) && reset > 0 ? `, the budget resets at ${iso(reset * 1000)}` : ''}); stopping, the next run tries again`);
@@ -223,6 +266,10 @@ export async function runArchive({
       throw err;
     }
   }
+
+  // Not covered and nothing in flight: remember when this job first asked, so the 24-hour
+  // clock survives the runs (an outage before any request counts too).
+  if (!covered && !out.red && pending === null) pending = waiting();
 
   // What this run leaves behind: records, and a request that outlives the run.
   const pendingChanged = JSON.stringify(pending ?? null) !== JSON.stringify(committedPending ?? null);
@@ -236,9 +283,11 @@ export async function runArchive({
     const first = out.records[0]?.record;
     const title = first
       ? `archive: Software Heritage snapshot ${first.snapshot_swhid} holds ${first.mirror_commit.slice(0, 12)}`
-      : pending
+      : pending?.saveRequestId != null
         ? `archive: save request ${pending.saveRequestId} for ${pending.target.slice(0, 12)} is in flight`
-        : 'archive: no save request in flight';
+        : pending
+          ? `archive: no save request in flight; first asked for ${pending.target.slice(0, 12)} at ${pending.requestedAt}`
+          : 'archive: no save request in flight';
     const body = out.records.map((r) => `Record: ${r.file} (visit ${r.record.visit_date}, save request ${r.record.save_request_id ?? 'none'})`);
     git(repo, ['commit', '-q', '-F', '-'], [title, '', ...body, ''].join('\n'));
     out.committed = true;
@@ -248,9 +297,9 @@ export async function runArchive({
     out.status = 'covered';
     say('notice', `a full Software Heritage snapshot (${snapshotUsed}) holds ${target}`);
   } else if (!out.red) {
-    const committedAt = Number(git(repo, ['log', '-1', '--format=%ct', target])) * 1000;
-    if (now() - committedAt > STALE_AFTER_MS) {
-      say('error', `no full Software Heritage snapshot holds ${target} 24 hours after it was committed`);
+    const firstAsked = Date.parse(pending.requestedAt);
+    if (now() - firstAsked > STALE_AFTER_MS) {
+      say('error', `no full Software Heritage snapshot holds ${target} 24 hours after this job first asked for it (${pending.requestedAt})`);
       out.red = true;
       out.status = 'stale';
     } else if (out.status === 'skipped') out.status = 'pending';
@@ -264,6 +313,7 @@ async function main() {
     repo: resolve(args.repo ?? '.'),
     originUrl: process.env.ORIGIN_URL,
     token: process.env.SWH_TOKEN,
+    env: process.env.PSN_ENV,
     commit: Boolean(args.commit),
   });
   setOutput('committed', out.committed);

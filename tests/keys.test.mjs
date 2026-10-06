@@ -40,9 +40,31 @@ test('a kid that disappears while the set also changed otherwise is an incident'
   assert.ok(r.problems[0].includes('psn-dev-2026-1 disappeared'));
 });
 
-test('an older copy of the set (a kid missing, nothing newer) is a stale read', () => {
-  assert.equal(compareKeySets(set(a.entry, b.entry), set(a.entry)).verdict, 'stale');
-  assert.equal(compareKeySets(set(retired(a.entry)), set(a.entry)).verdict, 'stale');
+test('an older copy of the set (a kid missing, nothing newer) is "stale", naming what makes it older', () => {
+  const missing = compareKeySets(set(a.entry, b.entry), set(a.entry));
+  assert.equal(missing.verdict, 'stale');
+  assert.deepEqual(missing.gone, ['psn-dev-2026-2']);
+  const back = compareKeySets(set(retired(a.entry)), set(a.entry));
+  assert.equal(back.verdict, 'stale');
+  assert.deepEqual(back.backwards, ['psn-dev-2026-1']);
+});
+
+test('a changed notBefore (a backdated key) is an incident, not an advance', () => {
+  const backdated = { ...a.entry, 'psn:validityWindow': { notBefore: '2020-01-01T00:00:00Z', notAfter: null } };
+  const r = compareKeySets(set(a.entry), set(backdated));
+  assert.equal(r.verdict, 'incident');
+  assert.ok(r.problems[0].includes('the validity window of psn-dev-2026-1 now opens at a different time'));
+  const later = { ...a.entry, 'psn:validityWindow': { notBefore: '2026-09-15T00:00:00Z', notAfter: null } };
+  assert.equal(compareKeySets(set(a.entry), set(later)).verdict, 'incident');
+});
+
+test('end to end: a backdated key is an incident and the key set is not committed', () => {
+  const w = world();
+  const mirrored = Object.fromEntries(evaluate(stateFromFiles({}), servedFrom(w.files), { env: 'dev' }).writes);
+  const backdated = { ...w.key.entry, 'psn:validityWindow': { notBefore: '2020-01-01T00:00:00Z', notAfter: null } };
+  const r = evaluate(stateFromFiles(mirrored), servedFrom({ ...w.files, 'jwks.json': jwksFile([backdated]) }), { env: 'dev' });
+  assert.equal(r.outcome, 'incident');
+  assert.equal(r.writes.size, 0);
 });
 
 test('end to end: a key-set incident stops the run and moves nothing', () => {

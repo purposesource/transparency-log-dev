@@ -18,6 +18,24 @@ async function mirroredRepo() {
 }
 const has = (list, fragment) => assert.ok(list.some((p) => p.includes(fragment)), `expected "${fragment}" in ${JSON.stringify(list)}`);
 
+/**
+ * A commit on top of HEAD whose tree is `tree` (or HEAD's tree plus `name` under checkpoints/),
+ * made through plumbing: no index and no checkout, so a name Windows refuses can be committed.
+ */
+function plumbingCommit(dir, { addName, bytes, tree } = {}) {
+  const g = (args, input) => execFileSync('git', args, { cwd: dir, input, encoding: 'utf8' }).trim();
+  let root = tree;
+  if (!root) {
+    const blob = g(['hash-object', '-w', '--stdin'], bytes);
+    const sub = g(['mktree'], `${g(['ls-tree', 'HEAD:checkpoints'])}\n100644 blob ${blob}\t${addName}\n`);
+    const lines = g(['ls-tree', 'HEAD']).split('\n').map((l) => (l.endsWith('\tcheckpoints') ? l.replace(/[0-9a-f]{40}/, sub) : l));
+    root = g(['mktree'], `${lines.join('\n')}\n`);
+  }
+  const commit = g(['commit-tree', root, '-p', 'HEAD', '-m', 'plumbing']);
+  g(['update-ref', 'refs/heads/main', commit]);
+  return commit;
+}
+
 test('a mirror of the live dev log verifies, history included', async () => {
   const { dir } = await mirroredRepo();
   const out = verifyDirectory(dir, 'dev', { history: true });
@@ -48,7 +66,27 @@ test('history: a key that leaves the key set in a later commit is found', async 
   writeFileSync(join(dir, 'jwks.json'), published({ schemaVersion: 1, generatedAt: '2026-10-07T00:00:00Z', keys: [] }));
   git('commit', '-q', '-am', 'drop the key');
   const out = verifyDirectory(dir, 'dev', { history: true });
-  has(out.problems, 'went back to an older version');
+  has(out.problems, 'psn-dev-2026-2 missing');
+});
+
+test('history: a key set that goes back to an older copy in a later commit is found', async () => {
+  const { dir, git } = await mirroredRepo();
+  const old = JSON.parse(readFileSync(join(dir, 'jwks.json'), 'utf8'));
+  writeFileSync(join(dir, 'jwks.json'), published({ ...old, keys: [] }));
+  git('commit', '-q', '-am', 'an older copy');
+  has(verifyDirectory(dir, 'dev', { history: true }).problems, 'jwks.json went back to an older version');
+});
+
+test('history: a file outside the layout in a past commit fails, even when no checkout can hold it (a colon in the name)', async () => {
+  const { dir, git } = await mirroredRepo();
+  const clean = git('rev-parse', 'HEAD^{tree}');
+  const jws = readFileSync(join(dir, 'checkpoints/20261001T002021Z_0.jws'));
+  const stray = plumbingCommit(dir, { addName: '2026-10-01T00:20:21Z_0.jws', bytes: jws }).slice(0, 12);
+  plumbingCommit(dir, { tree: clean }); // and removed again
+  assert.equal(git('status', '--porcelain'), '');
+  assert.deepEqual(verifyDirectory(dir, 'dev').problems, [], 'the working tree is clean');
+  const out = verifyDirectory(dir, 'dev', { history: true });
+  assert.ok(out.problems.includes(`${stray}: a file with an unusual name does not belong in the mirror's layout`), JSON.stringify(out.problems));
 });
 
 test('history: a checkpoint file rewritten in a later commit is found', async () => {

@@ -1,13 +1,16 @@
 // The key set only grows (plan correction 5; FS08-102 and CERT-022: historical keys stay for
-// ever). A kid never disappears, a kid's key material never changes, and a new kid is
-// flagged. A key's STANDING (psn:status, psn:validityWindow) may move forward (active to
-// retired to compromised, a window that closes); that is a key-set change and is committed.
+// ever). A kid never disappears, a kid's key material never changes, a key's window never
+// opens at a different time (a changed notBefore would backdate the key), and a new kid is
+// flagged. A key's STANDING (psn:status, psn:validityWindow.notAfter) may move forward (active
+// to retired to compromised, a window that closes); that is a key-set change and is committed.
 //
 // A served key set that is an OLDER version of the mirrored one (a kid missing, or a
-// standing that moved backwards, and nothing newer) is a stale cache read, not a shrinking
-// set: /jwks.json is cached for an hour and, while the origin errs, for up to a day
-// (stale-if-error=86400). Only a set that is neither older nor newer, or that changes key
-// material, is an incident.
+// standing that moved backwards, and nothing newer) may be a stale cache read: /jwks.json is
+// cached for an hour and, while the origin errs, for up to a day (stale-if-error=86400). The
+// verdict here is 'stale'; lib/evaluate.mjs decides whether a cache can still explain it (it
+// cannot when the served set was generated later than the mirrored one, or when the mirror
+// committed the newer set longer ago than any cache keeps a copy). A set that is neither
+// older nor newer, or that changes key material or a notBefore, is an incident.
 //
 // THIS IS NOT THE OUT-OF-BAND KEY CHANNEL. This repository copies the key set the edge
 // serves; anyone who could substitute both the edge's checkpoint and its key set would pass
@@ -28,13 +31,13 @@ function standingOf(key) {
   };
 }
 
-/** 'same', 'later', 'earlier' or 'changed' (moved in a way that is neither, e.g. a new notBefore). */
+/** 'same', 'later', 'earlier', 'backdated' (notBefore changed) or 'changed' (moved in a way that is neither forward nor back). */
 function compareStanding(a, b) {
   const sa = standingOf(a);
   const sb = standingOf(b);
   const same = (x, y) => x === y || (x !== null && y !== null && instantMs(x) === instantMs(y));
   if (sa.status === sb.status && same(sa.notBefore, sb.notBefore) && same(sa.notAfter, sb.notAfter)) return 'same';
-  if (!same(sa.notBefore, sb.notBefore)) return 'changed';
+  if (!same(sa.notBefore, sb.notBefore)) return 'backdated';
   const ra = KEY_STATUSES.indexOf(sa.status);
   const rb = KEY_STATUSES.indexOf(sb.status);
   const closes = sa.notAfter === null && sb.notAfter !== null;
@@ -47,7 +50,8 @@ function compareStanding(a, b) {
 
 /**
  * How the served key set relates to the mirrored one:
- *   { verdict: 'new' | 'same' | 'advance' | 'stale' | 'incident', problems, notices }
+ *   { verdict: 'new' | 'same' | 'advance' | 'stale' | 'incident', problems, notices, gone, backwards }
+ * `gone` and `backwards` name the kids that make a 'stale' set older (missing, or standing moved back).
  */
 export function compareKeySets(mirroredDoc, servedDoc) {
   if (!mirroredDoc) {
@@ -57,12 +61,15 @@ export function compareKeySets(mirroredDoc, servedDoc) {
   const after = byKid(servedDoc);
   const problems = [];
   const notices = [];
+  const gone = [];
+  const backwards = [];
   let older = 0;
   let newer = 0;
   for (const [kid, key] of before) {
     const now = after.get(kid);
     if (!now) {
       older++;
+      gone.push(kid);
       continue;
     }
     const changed = KEY_MATERIAL.filter((m) => key[m] !== now[m]);
@@ -71,11 +78,14 @@ export function compareKeySets(mirroredDoc, servedDoc) {
       continue;
     }
     const standing = compareStanding(key, now);
-    if (standing === 'later') {
+    if (standing === 'backdated') {
+      problems.push(`jwks.json: the validity window of ${kid} now opens at a different time (psn:validityWindow.notBefore changed); a key's notBefore never changes, and an earlier one would backdate the key`);
+    } else if (standing === 'later') {
       newer++;
       notices.push(`jwks.json: the standing of ${kid} moved forward (now ${now['psn:status'] ?? 'no status'})`);
     } else if (standing === 'earlier') {
       older++;
+      backwards.push(kid);
     } else if (standing === 'changed') {
       newer++;
       notices.push(`jwks.json: the standing of ${kid} changed in a way that is neither forward nor back (check its window)`);
@@ -87,9 +97,8 @@ export function compareKeySets(mirroredDoc, servedDoc) {
       notices.push(`jwks.json: a new key appears, ${kid}`);
     }
   }
-  if (problems.length) return { verdict: 'incident', problems, notices };
+  if (problems.length) return { verdict: 'incident', problems, notices, gone, backwards };
   if (older && newer) {
-    const gone = [...before.keys()].filter((kid) => !after.has(kid));
     return {
       verdict: 'incident',
       problems: [
@@ -98,9 +107,11 @@ export function compareKeySets(mirroredDoc, servedDoc) {
           : 'jwks.json: a key standing moved backwards in a key set that also changed otherwise',
       ],
       notices,
+      gone,
+      backwards,
     };
   }
-  if (older) return { verdict: 'stale', problems: [], notices: ['jwks.json as served is an older version of the mirrored key set (a stale cache read); kept the mirrored copy'] };
-  if (newer) return { verdict: 'advance', problems: [], notices };
-  return { verdict: 'same', problems: [], notices: [] };
+  if (older) return { verdict: 'stale', problems: [], notices: [], gone, backwards };
+  if (newer) return { verdict: 'advance', problems: [], notices, gone, backwards };
+  return { verdict: 'same', problems: [], notices: [], gone, backwards };
 }

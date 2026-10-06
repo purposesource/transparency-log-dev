@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { evaluate } from './lib/evaluate.mjs';
 import { git, parseArgs } from './lib/runtime.mjs';
 import { ENVIRONMENTS, SERVED_PATHS } from './lib/spec.mjs';
-import { emptyState, readState, readStateAt } from './lib/state.mjs';
+import { emptyState, readState, readStateAt, safePath } from './lib/state.mjs';
 import { verifyState } from './lib/verify-state.mjs';
 
 /** Treats a later state as what was "served" to the earlier one, so the mirror's own growth rules judge each step. */
@@ -39,6 +39,10 @@ export function verifyHistory(dir, env) {
   for (const commit of commits) {
     const state = readStateAt(dir, commit);
     const at = commit.slice(0, 12);
+    // Every commit's own layout: a file that does not belong (a colon in a checkpoint name, a
+    // stray under ct/ or checkpoints/) fails in the commit that holds it, even when a later
+    // commit removed it or the checkout cannot hold it.
+    for (const path of state.strays) problems.push(`${at}: ${safePath(path)} does not belong in the mirror's layout`);
     // Files may only be added or grow: nothing under the layout disappears.
     for (const [n] of previous.segments) if (!state.segments.has(n)) problems.push(`${at}: ${SERVED_PATHS.segment(n)} was removed`);
     for (const [name, bytes] of previous.checkpoints) {
@@ -53,12 +57,13 @@ export function verifyHistory(dir, env) {
     if (previous.latest && !state.latest) problems.push(`${at}: ct/latest.json was removed`);
     // The growth rules the mirror applies when it reads the edge, applied to this step.
     if (previousCommit) {
-      const step = evaluate(previous, asServed(state), { env });
-      if (step.outcome === 'incident' || step.outcome === 'mirror-broken') {
+      // Strays are reported above, once per commit that holds them; the step judges the layout's files.
+      const step = evaluate({ ...previous, strays: [] }, asServed(state), { env });
+      if (step.outcome === 'incident' || step.outcome === 'mirror-broken' || step.outcome === 'misconfigured') {
         problems.push(...step.incidents.map((p) => `${at} (after ${previousCommit.slice(0, 12)}): ${p}`));
       }
       // A step the mirror would call stale moved backwards: the commit replaced newer bytes with older ones.
-      if (step.notices.some((n) => n.includes('stale cache read'))) problems.push(`${at}: a file went back to an older version than the commit before held`);
+      if (step.stale.length) problems.push(`${at}: ${step.stale.join(', ')} went back to an older version than the commit before held`);
     }
     previous = state;
     previousCommit = commit;

@@ -90,6 +90,8 @@ const archive = (dir, fetchImpl, extra = {}) => {
   return runArchive({ repo: dir, originUrl: ORIGIN_URL, token: TOKEN, fetchImpl, now: c.now, sleep: c.sleep, commit: true, log: extra.log ?? silent, ...extra.run });
 };
 
+const HOUR = 3_600_000;
+
 test('no token: the save is skipped with a notice and nothing is called', async () => {
   const { dir } = await mirroredRepo();
   const swh = fakeSwh(dir);
@@ -99,6 +101,27 @@ test('no token: the save is skipped with a notice and nothing is called', async 
   assert.equal(out.red, false);
   assert.equal(swh.calls.length, 0);
   assert.ok(lines[0].startsWith('::notice::'));
+});
+
+test('prod without a token: a warning on every run while the first log commit is under 24 hours old, red after', async () => {
+  const { dir } = await mirroredRepo();
+  const swh = fakeSwh(dir);
+  const lines = [];
+  const early = await runArchive({ repo: dir, originUrl: ORIGIN_URL, token: '', env: 'prod', fetchImpl: swh, now: () => Date.now() + HOUR, log: (l) => lines.push(l) });
+  assert.equal(early.status, 'no-token');
+  assert.equal(early.red, false);
+  assert.ok(lines.some((l) => l.startsWith('::warning::') && l.includes('SWH_TOKEN is not set')), lines.join('\n'));
+  lines.length = 0;
+  const late = await runArchive({ repo: dir, originUrl: ORIGIN_URL, token: '', env: 'prod', fetchImpl: swh, now: () => Date.now() + 25 * HOUR, log: (l) => lines.push(l) });
+  assert.equal(late.red, true);
+  assert.ok(lines.some((l) => l.startsWith('::error::') && l.includes('more than 24 hours old')), lines.join('\n'));
+  assert.equal(swh.calls.length, 0);
+});
+
+test('prod without a token and nothing committed to the log yet: a notice, not red', async () => {
+  const { dir } = tempRepo();
+  const out = await runArchive({ repo: dir, originUrl: ORIGIN_URL, token: '', env: 'prod', now: () => Date.now() + 1000 * HOUR, log: silent });
+  assert.equal(out.red, false);
 });
 
 test('nothing committed to the log yet: nothing to archive, nothing called', async () => {
@@ -237,11 +260,63 @@ test('401: red, asking for a new token', async () => {
   assert.ok(lines.some((l) => l.startsWith('::error::') && l.includes('new token')));
 });
 
-test('red when no full snapshot holds the commit 24 hours after it was made', async () => {
+test('403: red, and it says forbidden (token lacks permission), not that the token expired', async () => {
   const { dir } = await mirroredRepo();
-  const out = await archive(dir, fakeSwh(dir, { status: 503 }), { start: Date.now() + 25 * 3600 * 1000 });
+  const lines = [];
+  const out = await archive(dir, fakeSwh(dir, { status: 403 }), { log: (l) => lines.push(l) });
+  assert.equal(out.red, true);
+  assert.equal(out.status, 'forbidden');
+  const error = lines.find((l) => l.startsWith('::error::'));
+  assert.ok(error.includes('forbidden (token lacks permission)'), error);
+  assert.ok(!error.includes('expired or was revoked'), error);
+});
+
+test('red when no full snapshot holds the commit 24 hours after this job first asked (Software Heritage unreachable from the first try)', async () => {
+  const { dir } = await mirroredRepo();
+  const t0 = Date.now();
+  const first = await archive(dir, fakeSwh(dir, { status: 503 }), { start: t0 });
+  assert.equal(first.red, false);
+  const state = JSON.parse(readFileSync(join(dir, 'swh/state.json'), 'utf8'));
+  assert.equal(state.pending.saveRequestId, null);
+  assert.equal(state.pending.requestedAt, new Date(t0).toISOString().slice(0, 19) + 'Z', 'the first attempt starts the clock');
+  const later = await archive(dir, fakeSwh(dir, { status: 503 }), { start: t0 + 25 * HOUR });
+  assert.equal(later.red, true);
+  assert.equal(later.status, 'stale');
+});
+
+test('a token that arrives more than 24 hours after the last log commit: the first run asks and is not red (the clock starts at the first request)', async () => {
+  const { dir } = await mirroredRepo();
+  const lines = [];
+  const out = await archive(dir, fakeSwh(dir, { pollsToFinish: 1000 }), { start: Date.now() + 30 * HOUR, log: (l) => lines.push(l) });
+  assert.equal(out.requests, 1);
+  assert.equal(out.red, false, lines.join('\n'));
+  assert.equal(out.status, 'pending');
+  const state = JSON.parse(readFileSync(join(dir, 'swh/state.json'), 'utf8'));
+  assert.equal(state.pending.saveRequestId, 1000);
+});
+
+test('the clock is kept across runs: a request still in flight 24 hours after the first one is red', async () => {
+  const { dir } = await mirroredRepo();
+  const t0 = Date.now() + 30 * HOUR;
+  const slow = fakeSwh(dir, { pollsToFinish: 10_000 });
+  await archive(dir, slow, { start: t0 });
+  const next = fakeSwh(dir, { knownSaves: slow.saves, pollsToFinish: 10_000 });
+  const out = await archive(dir, next, { start: t0 + 25 * HOUR });
+  assert.equal(out.requests, 0, 'the request in flight is polled, not repeated');
   assert.equal(out.red, true);
   assert.equal(out.status, 'stale');
+});
+
+test('a failed save keeps the clock running: the next run asks again, and is red 24 hours after the first request', async () => {
+  const { dir } = await mirroredRepo();
+  const t0 = Date.now() + 30 * HOUR;
+  await archive(dir, fakeSwh(dir, { outcome: 'failed' }), { start: t0 });
+  const kept = JSON.parse(readFileSync(join(dir, 'swh/state.json'), 'utf8')).pending;
+  assert.equal(kept.saveRequestId, null);
+  assert.equal(kept.requestedAt, new Date(t0).toISOString().slice(0, 19) + 'Z');
+  const out = await archive(dir, fakeSwh(dir, { outcome: 'failed' }), { start: t0 + 25 * HOUR });
+  assert.equal(out.requests, 1);
+  assert.equal(out.red, true);
 });
 
 test('Software Heritage down within the 24 hours: a warning, not red', async () => {

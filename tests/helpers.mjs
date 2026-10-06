@@ -38,6 +38,21 @@ export function servedFrom(files, fetchedAt = '2026-10-06T09:16:06Z') {
   return { latest: r(files['ct/latest.json']), segments, checkpointLatest: r(files['ct/checkpoint-latest.json']), jwks: r(files['jwks.json']), fetchedAt };
 }
 
+const HOUR = 3_600_000;
+
+/**
+ * A clock for lib/evaluate.mjs: `now` and the mirror's commit dates, all as ISO strings.
+ * `committed` maps a layout path to its commit date; `held` maps a segment to the date from
+ * which the mirror has held it as its open segment. A path not named counts as uncommitted.
+ */
+export function fakeClock({ now = '2026-10-06T12:00:00Z', committed = {}, held = {} } = {}) {
+  const ms = (v) => (v === undefined ? null : Date.parse(v));
+  return { now: Date.parse(now), committedAt: (path) => ms(committed[path]), heldSince: (segment) => ms(held[segment]) };
+}
+
+/** An ISO instant `h` hours before `iso`. */
+export const hoursBefore = (iso, h) => new Date(Date.parse(iso) - h * HOUR).toISOString().slice(0, 19) + 'Z';
+
 /* ------------------------------------------------------------------ a synthetic log */
 
 const BASE_TS = Date.UTC(2026, 9, 1, 0, 0, 0);

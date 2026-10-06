@@ -7,7 +7,9 @@
 // A PROBLEM is something the bytes contradict: a schema break, a broken chain, a bad
 // signature, a checkpoint that commits to another log. A PENDING note is something the
 // mirror cannot check YET because a copy is still short (the edge caches a numbered segment
-// for up to a day, plan correction 3); it is checked again on every run.
+// for up to a day, plan correction 3); it is checked again on every run, and the hourly
+// mirror turns a segment that stays missing or open past its window into an incident
+// (lib/evaluate.mjs). A NOTE is worth a look and is never a failure.
 
 import {
   CHECKPOINT_HEADER_MEMBERS,
@@ -190,8 +192,11 @@ export function verifyState(state, { env, extra = [] } = {}) {
   }
 
   // 3. The whole log: segments chained, seq contiguous, the entry rules across segments.
+  // `waits` names each segment that is missing or still open although a later one is held; the
+  // mirror turns a wait older than its window into an incident (lib/evaluate.mjs).
   const maxSegment = best.size ? Math.max(...best.keys()) : -1;
   const hashes = new Map();
+  const waits = [];
   let lastTs = null;
   let gap = false;
   let headSeq = -1;
@@ -199,6 +204,7 @@ export function verifyState(state, { env, extra = [] } = {}) {
     const seg = best.get(n);
     if (!seg) {
       pending.push(`segment ${n} is not mirrored yet, although a later segment is; its link is checked once it is`);
+      waits.push({ segment: n, entries: null });
       gap = true;
       continue;
     }
@@ -210,6 +216,7 @@ export function verifyState(state, { env, extra = [] } = {}) {
       }
     } else if (n > 0 && prev) {
       pending.push(`segment ${n - 1} holds ${prev.doc.entries.length} entries in the mirror's newest copy and is no longer the open segment; its closed copy is not served yet (a numbered segment is cached for up to a day), so the link to segment ${n} waits`);
+      waits.push({ segment: n - 1, entries: prev.doc.entries.length });
     }
     for (const e of seg.doc.entries) {
       const ts = instantMs(e.ts);
@@ -255,8 +262,15 @@ export function verifyState(state, { env, extra = [] } = {}) {
       if (got !== payload.headSegmentSha256) {
         problems.push(`${at}: headSegmentSha256 ${short(payload.headSegmentSha256)} is not the SHA-256 of segment ${payload.headSegment} cut at seq ${payload.headSeq} and re-rendered (${short(got)}): the checkpoint commits to a different log`);
       }
+      // A NOTE, not a problem, until the platform closes a race in its own code. CtPublish
+      // (Conductor's ct-publish job, CtPublishProgram.cs) takes `now` as asOf BEFORE it reads
+      // the entries, and reads them under the checkpoint lock rather than the append lock;
+      // appenders may also write a ts up to two minutes ahead (CtLogAppend.MaxClockLead). So
+      // an honest checkpoint can name a head whose ts is slightly later than asOf. Once
+      // CtPublish takes asOf after reading the entries, or bounds them by ts <= asOf, this
+      // becomes a problem again. The orchestrator reports the race to Conductor separately.
       const head = seg.doc.entries[need - 1];
-      if (instantMs(head.ts) > instantMs(payload.asOf)) problems.push(`${at}: the entry at headSeq ${payload.headSeq} is later than asOf, so it cannot be the head at asOf`);
+      if (instantMs(head.ts) > instantMs(payload.asOf)) notes.push(`${at}: the entry at headSeq ${payload.headSeq} is later than asOf (the platform takes asOf before it reads the entries; see the note in tools/lib/verify-state.mjs)`);
     }
     checkpoints.push({ name, asOf: payload.asOf, ms: instantMs(payload.asOf), headSeq: payload.headSeq, kid: header.kid, jws: bytes.toString('latin1') });
   }
@@ -287,7 +301,7 @@ export function verifyState(state, { env, extra = [] } = {}) {
     problems: [...new Set(problems)],
     pending: [...new Set(pending)],
     notes: [...new Set(notes)],
-    view: { best, maxSegment, headSeq, latestDoc, latestSegment: latestSeg, keyDoc, checkpoints, ckpLatest },
+    view: { best, maxSegment, headSeq, latestDoc, latestSegment: latestSeg, keyDoc, checkpoints, ckpLatest, waits },
   };
 }
 

@@ -13,8 +13,8 @@ const run = (mirrored, served, env = 'dev') => evaluate(stateFromFiles(mirrored)
 const has = (list, fragment) => assert.ok(list.some((p) => p.includes(fragment)), `expected "${fragment}" in ${JSON.stringify(list)}`);
 
 /** The mirror's files after it adopted `served` (what a first run writes). */
-function adopted(served) {
-  const r = run({}, served);
+function adopted(served, env = 'dev') {
+  const r = run({}, served, env);
   assert.deepEqual(r.incidents, []);
   return Object.fromEntries(r.writes);
 }
@@ -153,20 +153,47 @@ test('a convenience payload that differs from the signed one is an incident', ()
   has(r.incidents, 'convenience payload');
 });
 
-test('a head entry later than asOf is an incident', () => {
+test('a head entry later than asOf is a note (shown as a warning once), not an incident: the platform takes asOf before it reads the entries', () => {
   const key = makeKey();
   const entries = issueEntries(3);
   const payload = checkpointPayload(key, entries, 2, tsAt(1));
-  const r = run({}, { ...renderLog(entries), 'ct/checkpoint-latest.json': checkpointArtifact(signToken(key, payload), payload), 'jwks.json': jwksFile([key.entry]) });
-  assert.equal(r.outcome, 'incident');
-  has(r.incidents, 'later than asOf');
+  const files = { ...renderLog(entries), 'ct/checkpoint-latest.json': checkpointArtifact(signToken(key, payload), payload), 'jwks.json': jwksFile([key.entry]) };
+  const r = run({}, files);
+  assert.equal(r.outcome, 'changed');
+  assert.deepEqual(r.incidents, []);
+  has(r.warnings, 'later than asOf');
+  const state = verifyState(stateFromFiles(Object.fromEntries(r.writes)), { env: 'dev' });
+  assert.deepEqual(state.problems, []);
+  has(state.notes, 'later than asOf');
+  const again = run(Object.fromEntries(r.writes), files);
+  assert.ok(!again.warnings.some((w) => w.includes('later than asOf')), 'a note already mirrored is not repeated as a warning every run');
 });
 
 test('prod: a checkpoint signed under a psn-dev- key is refused (the S5 fence)', () => {
-  const w = world({ key: makeKey('psn-dev-2026-9') });
-  const r = run({}, w.files, 'prod');
+  const prod = world({ key: makeKey('psn-prod-2026-1') });
+  const mirrored = adopted({ ...prod.files, 'ct/checkpoint-latest.json': undefined }, 'prod');
+  const dev = world({ key: makeKey('psn-dev-2026-9') });
+  const r = run(mirrored, { ...prod.files, 'ct/checkpoint-latest.json': dev.files['ct/checkpoint-latest.json'], 'jwks.json': jwksFile([prod.key.entry, dev.key.entry]) }, 'prod');
   assert.equal(r.outcome, 'incident');
   has(r.incidents, 'outside the prod fence');
+});
+
+test('an empty prod mirror whose origin serves only psn-dev- keys is "misconfigured" (a setting error), not an incident', () => {
+  const dev = world({ key: makeKey('psn-dev-2026-9') });
+  const r = run({}, dev.files, 'prod');
+  assert.equal(r.outcome, 'misconfigured');
+  has(r.incidents, 'every key the origin serves (psn-dev-2026-9) is outside the prod fence');
+  has(r.incidents, 'PSN_ENV or PSN_ORIGIN');
+  assert.equal(r.writes.size, 0);
+  assert.equal(r.evidence.length, 0, 'nothing is kept as evidence');
+});
+
+test('the same served keys against a mirror that already holds a log are an incident, never "misconfigured"', () => {
+  const dev = world({ key: makeKey('psn-dev-2026-9') });
+  const prod = world({ key: makeKey('psn-prod-2026-1') });
+  const mirrored = adopted({ ...prod.files, 'ct/checkpoint-latest.json': undefined }, 'prod');
+  const r = run(mirrored, dev.files, 'prod');
+  assert.equal(r.outcome, 'incident');
 });
 
 test('prod: a psn-dev- checkpoint served beside a clean prod key set is an incident, not a quiet skip', () => {

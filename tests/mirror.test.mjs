@@ -1,12 +1,14 @@
 // tools/mirror.mjs end to end, against a fake edge and a real temporary git repository.
 
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { runMirror } from '../tools/mirror.mjs';
-import { devFixtures, edgeFetch, ORIGIN, silent, tempRepo } from './helpers.mjs';
+import { renderLatest, renderSegment } from '../tools/lib/canonical.mjs';
+import { gitClock, runMirror } from '../tools/mirror.mjs';
+import { devFixtures, edgeFetch, issueEntries, ORIGIN, renderLog, silent, tempRepo } from './helpers.mjs';
 
 const at = (iso) => () => new Date(iso);
 const mirror = (dir, files, opts = {}) =>
@@ -159,6 +161,71 @@ test('dry run: says what it would commit and writes nothing', async () => {
   assert.equal(existsSync(join(dir, 'ct')), false);
   assert.equal(git('status', '--porcelain'), '');
   assert.ok(lines.some((l) => l.includes('would commit')));
+});
+
+test('a wrong PSN_ENV on an empty mirror is "misconfigured": red, no commit, no incident, no issue', async () => {
+  const { dir, git } = tempRepo();
+  const head = git('rev-parse', 'HEAD');
+  const lines = [];
+  const out = await runMirror({ repo: dir, origin: ORIGIN, env: 'prod', fetchImpl: edgeFetch(devFixtures()), commit: true, log: (l) => lines.push(l) });
+  assert.equal(out.outcome, 'misconfigured');
+  assert.equal(out.exitCode, 1);
+  assert.equal(out.committed, false);
+  assert.equal(out.incident, false, 'no issue is opened for a setting error');
+  assert.equal(git('rev-parse', 'HEAD'), head);
+  assert.equal(existsSync(join(dir, 'incidents')), false);
+  assert.ok(lines.some((l) => l.startsWith('::error::') && l.includes('psn-dev-2026-2') && l.includes('PSN_ENV')), lines.join('\n'));
+});
+
+test('a served file with CRLF line ends is an incident whose evidence is kept exactly as served, CRs included', async () => {
+  const { dir } = tempRepo();
+  await mirror(dir, devFixtures());
+  const files = devFixtures();
+  const crlf = Buffer.from(files['ct/latest.json'].toString().replaceAll('\n', '\r\n'));
+  files['ct/latest.json'] = crlf;
+  const out = await mirror(dir, files, { now: '2026-10-06T10:37:00Z' });
+  assert.equal(out.outcome, 'incident');
+  assert.ok(readFileSync(join(dir, 'incidents/20261006T103700Z/ct/latest.json')).equals(crlf), 'the evidence is byte for byte as served');
+});
+
+test('cache windows on the git clock: a shorter latest.json just after the commit is a stale read; 3 hours later it is an incident', async () => {
+  const { dir, git } = tempRepo();
+  await mirror(dir, devFixtures());
+  const head = git('rev-parse', 'HEAD');
+  const committed = Number(git('log', '-1', '--format=%ct')) * 1000;
+  const files = devFixtures();
+  const latest = JSON.parse(files['ct/latest.json'].toString());
+  files['ct/latest.json'] = renderLatest({ ...latest, entries: [], generatedAt: '2026-10-05T00:00:00Z' });
+  files['ct/0.json'] = renderSegment({ ...latest, entries: [] });
+  const soon = await mirror(dir, files, { now: new Date(committed + 60_000).toISOString() });
+  assert.equal(soon.outcome, 'unchanged');
+  assert.deepEqual(soon.result.stale.sort(), ['ct/0.json', 'ct/latest.json']);
+  assert.equal(git('rev-parse', 'HEAD'), head);
+  const later = await mirror(dir, files, { now: new Date(committed + 3 * 3_600_000).toISOString() });
+  assert.equal(later.outcome, 'incident');
+  assert.ok(later.result.incidents.some((p) => p.startsWith('ct/latest.json as served ends at head seq none')), JSON.stringify(later.result.incidents));
+  assert.ok(!later.result.incidents.some((p) => p.startsWith('ct/0.json')), 'ct/0.json is still inside its 26-hour window');
+});
+
+test('gitClock reads the commit dates: when a path was last committed, and since when latest.json has named a segment', () => {
+  const { dir } = tempRepo();
+  const commitAt = (date, message) => {
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-q', '-m', message], { cwd: dir, env: { ...process.env, GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date } });
+  };
+  mkdirSync(join(dir, 'ct'));
+  writeFileSync(join(dir, 'ct/latest.json'), renderLog(issueEntries(9999))['ct/latest.json']);
+  commitAt('2026-10-01T00:00:00Z', 'segment 0');
+  writeFileSync(join(dir, 'ct/latest.json'), renderLog(issueEntries(10001))['ct/latest.json']);
+  commitAt('2026-10-02T00:00:00Z', 'segment 1');
+  writeFileSync(join(dir, 'ct/latest.json'), renderLog(issueEntries(10002))['ct/latest.json']);
+  commitAt('2026-10-03T00:00:00Z', 'segment 1 grew');
+  const clock = gitClock(dir, Date.parse('2026-10-04T00:00:00Z'));
+  assert.equal(clock.committedAt('ct/latest.json'), Date.parse('2026-10-03T00:00:00Z'));
+  assert.equal(clock.committedAt('ct/0.json'), null);
+  assert.equal(clock.heldSince(1), Date.parse('2026-10-02T00:00:00Z'));
+  assert.equal(clock.heldSince(0), Date.parse('2026-10-01T00:00:00Z'));
+  assert.equal(clock.heldSince(2), null);
 });
 
 test('a misconfigured environment name is red', async () => {

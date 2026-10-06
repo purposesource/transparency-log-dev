@@ -55,7 +55,7 @@ export function git(cwd, args, input) {
 /** git that may fail: returns { ok, out }. */
 export function gitTry(cwd, args) {
   try {
-    return { ok: true, out: execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() };
+    return { ok: true, out: execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }).trim() };
   } catch {
     return { ok: false, out: '' };
   }
