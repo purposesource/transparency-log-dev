@@ -1,11 +1,22 @@
-# Purpose Source transparency log: public mirror
+# Purpose Source transparency log: DEV practice mirror
 
-This repository is a copy of the Purpose Source certificate transparency log, as the public edge
-at `https://api.purposesource.org` serves it. A GitHub Actions workflow in this repository reads
-the log every hour, checks that the log only grew, and commits once when something new was
-published. After each change it asks [Software Heritage](https://www.softwareheritage.org/) to
-archive the repository. Software Heritage is a non-profit archive of public code, and its copy
-is the part that neither the Association nor GitHub controls.
+> **DEV. This is the practice copy of the development log, and it has no legal meaning.**
+> Nothing here is a licence record, the log of record, or evidence about any real certificate
+> or waiver. It exists to rehearse the real mirror,
+> [`purposesource/transparency-log`](https://github.com/purposesource/transparency-log), which
+> copies the production log.
+>
+> **It is archived permanently by Software Heritage**, exactly like the real one, so that the
+> archive path is proved for real. That harms nothing: it holds only hashes, types and times,
+> signed under `psn-dev-` keys.
+
+This repository is a copy of the Purpose Source **development** transparency log, as the dev
+edge at `https://dev-api.purposesource.org` serves it. A GitHub Actions workflow in this
+repository reads the log every hour, checks that the log only grew, and commits once when
+something new was published. After each change it asks
+[Software Heritage](https://www.softwareheritage.org/) to archive the repository. Software
+Heritage is a non-profit archive of public code, and its copy is the part that neither the
+Association nor GitHub controls.
 
 **What it holds is hashes, types and times only.** A log entry carries a SHA-256 hash, a type
 code, a kind, a reference to another entry's hash and a timestamp. It carries nothing else: no
@@ -42,10 +53,10 @@ You need git and Node.js 22 or later. Nothing is installed: the tools use only N
 modules.
 
 ```sh
-git clone https://github.com/purposesource/transparency-log
-cd transparency-log
-node tools/verify.mjs --env prod             # the files as they stand
-node tools/verify.mjs --env prod --history   # and every commit against the one before it
+git clone https://github.com/purposesource/transparency-log-dev
+cd transparency-log-dev
+node tools/verify.mjs --env dev              # the files as they stand
+node tools/verify.mjs --env dev --history    # and every commit against the one before it
 node --test tests/*.test.mjs                 # the verifier's own tests
 ```
 
@@ -89,7 +100,7 @@ The log as a whole:
 The checkpoints:
 
 - Each token is ES256 and verifies under its kid in `jwks.json`.
-- On this repository the kid starts `psn-prod-`. On the dev repository it starts `psn-dev-`.
+- On this repository the kid starts `psn-dev-`. On the production repository it starts `psn-prod-`.
 - Its file name follows from its signed `asOf` and `headSeq`.
 - **Its `headSegmentSha256` is the SHA-256 of the head segment, cut at `headSeq` and rendered
   again.** This is the check that gives a checkpoint its meaning: a validly signed checkpoint
@@ -170,7 +181,7 @@ that copy, not against this one.
   Before the edge serves the log at all, every run ends green with the notice "not published at
   this origin yet".
 - **A setting error is not an incident.** If the mirror is empty and every key the origin
-  serves is outside this repository's fence (`psn-prod-` here, `psn-dev-` on the dev
+  serves is outside this repository's fence (`psn-dev-` here, `psn-prod-` on the production
   repository), the repository variables `PSN_ENV` or `PSN_ORIGIN` are wrong. The run goes red,
   commits nothing and opens no issue. With `PSN_ORIGIN` unset the workflow is switched off: both
   jobs are skipped and it stays green.
@@ -217,7 +228,7 @@ For each checkpoint the snapshot holds, the run writes `checkpoints/{name}.swh.j
 ```json
 {
   "checkpoint": "checkpoints/20261101T002000Z_41.jws",
-  "origin_url": "https://github.com/purposesource/transparency-log",
+  "origin_url": "https://github.com/purposesource/transparency-log-dev",
   "snapshot_swhid": "swh:1:snp:…",
   "visit_date": "2026-11-01T01:02:03.456789+00:00",
   "visit_status": "full",
@@ -253,7 +264,7 @@ is the checkpoint.
 ## How this repository is protected
 
 - A ruleset on `main` blocks force pushes and deletion, with nobody exempt. Each run checks that
-  the rules are in place and goes red if they are not.
+  the rules are in place and warns if they are not (on the production repository it goes red).
 - The workflow writes with the repository's own `GITHUB_TOKEN`. The workflow as a whole is
   granted nothing; the mirror job gets `contents: write` and `issues: write` on this repository,
   and the archive job `contents: write` only. That token expires when the job ends. Pushes are
@@ -289,6 +300,7 @@ with the specification.
 
 ## Licence
 
-The log files in this repository are public data published by the Purpose Source Association.
+The log files in this repository are public data published by the Purpose Source Association,
+from its development system.
 The tools (`tools/`, `tests/` and `.github/workflows/`) are licensed under the Apache License,
 Version 2.0. The text is in [`tools/LICENSE`](tools/LICENSE).
