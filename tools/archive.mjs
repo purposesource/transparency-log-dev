@@ -19,8 +19,9 @@
 //   - The 24-hour clock starts when this job FIRST ASKS Software Heritage for the target (the
 //     first save request, or the first attempt that found Software Heritage unreachable), and
 //     is kept as `requestedAt` in swh/state.json across runs. A failed request keeps the clock
-//     running; a save that completed without capturing the newest target restarts it (Software
-//     Heritage works, the log just moved on). Red when no full snapshot covers the target 24
+//     running; a save that captured the commit it was asked for, but not the newest target,
+//     restarts it (Software Heritage works, the log just moved on); a save that completed on an
+//     older snapshot than the one asked for keeps it running. Red when no full snapshot covers the target 24
 //     hours after that first ask. A token that arrives late therefore starts the clock then,
 //     not at the commit's date.
 //   - 429: stop, try again next run. 401: red, the token expired or was revoked. 403: red,
@@ -212,6 +213,7 @@ export async function runArchive({
       }
       if (state === 'done') {
         const main = await client.snapshotMain(save.snapshot_swhid.slice('swh:1:snp:'.length));
+        let capturedAsked = false;
         if (main) {
           checkHistory(main);
           writeRecords(main, { snapshot_swhid: save.snapshot_swhid, visit_date: save.visit_date, visit_status: save.visit_status, save_request_id: save.id });
@@ -221,11 +223,15 @@ export async function runArchive({
             pending = null;
             break;
           }
+          capturedAsked = Boolean(pending?.target) && known(pending.target) && ancestor(pending.target, main);
         }
         say('notice', `save request ${save.id} finished without capturing ${target}; one new request`);
         save = null;
         pending = null;
-        since = null; // a save completed, so Software Heritage works: the clock restarts with the next request
+        // Only a save that captured the commit it was asked for shows that the log merely moved
+        // on: then the clock restarts with the next request. A save that completed on an older
+        // snapshot than the one asked for keeps the clock running.
+        if (capturedAsked) since = null;
         continue;
       }
       if (state === 'failed') {

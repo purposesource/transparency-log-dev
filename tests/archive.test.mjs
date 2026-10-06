@@ -319,6 +319,40 @@ test('a failed save keeps the clock running: the next run asks again, and is red
   assert.equal(out.red, true);
 });
 
+test('saves that always complete on an older snapshot than the one asked for keep the clock: red 24 hours after the first request', async () => {
+  const { dir, git } = await mirroredRepo();
+  const old = git('rev-list', '--max-parents=0', 'HEAD');
+  const t0 = Date.now() + 30 * HOUR;
+  const first = await archive(dir, fakeSwh(dir, { captures: () => old, pollsToFinish: 1 }), { start: t0 });
+  assert.equal(first.red, false);
+  const kept = JSON.parse(readFileSync(join(dir, 'swh/state.json'), 'utf8')).pending;
+  assert.equal(kept.requestedAt, new Date(t0).toISOString().slice(0, 19) + 'Z');
+  const out = await archive(dir, fakeSwh(dir, { captures: () => old, pollsToFinish: 1 }), { start: t0 + 25 * HOUR });
+  assert.equal(out.red, true);
+  assert.equal(out.status, 'stale');
+});
+
+test('a kept save that captured the commit it was asked for, while the log moved on, restarts the clock', async () => {
+  const { dir, git } = await mirroredRepo();
+  const asked = git('rev-parse', 'HEAD');
+  const askedHex = snapHex(asked);
+  writeFileSync(join(dir, 'later.txt'), 'x');
+  mkdirSync(join(dir, 'incidents', '20261006T000000Z'), { recursive: true });
+  writeFileSync(join(dir, 'incidents', '20261006T000000Z', 'reason.txt'), 'a later target\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'a later target');
+  const t0 = Date.now() + 30 * HOUR;
+  const known = new Map([[88, { id: 88, save_request_status: 'accepted', save_task_status: 'succeeded', visit_status: 'full', snapshot_swhid: `swh:1:snp:${askedHex}`, visit_date: '2026-10-06T09:00:00+00:00' }]]);
+  mkdirSync(join(dir, 'swh'), { recursive: true });
+  writeFileSync(join(dir, 'swh', 'state.json'), JSON.stringify({ pending: { saveRequestId: 88, target: asked, requestedAt: new Date(t0 - 30 * HOUR).toISOString().slice(0, 19) + 'Z' } }, null, 2) + '\n');
+  git('add', 'swh/state.json');
+  git('commit', '-q', '-m', 'archive: save request 88 in flight');
+  const out = await archive(dir, fakeSwh(dir, { knownSaves: known, snapshots: new Map([[askedHex, asked]]), pollsToFinish: 10_000 }), { start: t0 });
+  assert.equal(out.requests, 1);
+  assert.equal(out.red, false);
+  assert.equal(JSON.parse(readFileSync(join(dir, 'swh/state.json'), 'utf8')).pending.requestedAt, new Date(t0).toISOString().slice(0, 19) + 'Z');
+});
+
 test('Software Heritage down within the 24 hours: a warning, not red', async () => {
   const { dir } = await mirroredRepo();
   const out = await archive(dir, fakeSwh(dir, { status: 503 }));
