@@ -1,0 +1,10 @@
+{
+  "checkpoint": "checkpoints/20261001T002021Z_0.jws",
+  "origin_url": "https://github.com/purposesource/transparency-log-dev",
+  "snapshot_swhid": "swh:1:snp:e7297347a069f9d01599cb14aabd6a896d516f48",
+  "visit_date": "2026-10-06T11:03:26.433000+00:00",
+  "visit_status": "full",
+  "save_request_id": null,
+  "save_request_url": null,
+  "mirror_commit": "c0b0910d8902d16ca9d5cda465734b1c374f4c26"
+}
