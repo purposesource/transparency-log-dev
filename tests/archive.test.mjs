@@ -262,6 +262,15 @@ test('a snapshot whose main is not in this history (rewritten history) is red, a
   assert.equal(git('rev-parse', 'HEAD'), head);
 });
 
+test('a visit without a visit date writes no record (a record that would not verify would stop the next mirror run)', async () => {
+  const { dir, git } = await mirroredRepo();
+  const head = git('rev-parse', 'HEAD');
+  const hex = snapHex(head);
+  const out = await archive(dir, fakeSwh(dir, { latestVisit: { status: 'full', snapshot: hex, date: null }, snapshots: new Map([[hex, head]]) }));
+  assert.equal(out.records.length, 0);
+  assert.equal(existsSync(join(dir, 'checkpoints/20261001T002021Z_0.swh.json')), false);
+});
+
 test('a rejected save request is red', async () => {
   const { dir } = await mirroredRepo();
   const out = await archive(dir, fakeSwh(dir, { rejected: true }));

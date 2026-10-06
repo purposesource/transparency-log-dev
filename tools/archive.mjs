@@ -27,7 +27,8 @@ import { fileURLToPath } from 'node:url';
 
 import { published } from './lib/canonical.mjs';
 import { annotate, git, gitTry, parseArgs, setOutput, stepSummary } from './lib/runtime.mjs';
-import { createSwhClient, saveOutcome, SwhError } from './lib/swh.mjs';
+import { isDateTime } from './lib/schema.mjs';
+import { createSwhClient, saveOutcome, SNAPSHOT_SWHID, SwhError } from './lib/swh.mjs';
 import { CHECKPOINT_FILE } from './lib/state.mjs';
 
 export const STATE_FILE = 'swh/state.json';
@@ -100,6 +101,12 @@ export async function runArchive({
     }
   };
   const writeRecords = (main, info) => {
+    // A record that would not verify is never written: the next mirror run checks the whole
+    // repository first, and a malformed record would stop it.
+    if (!isDateTime(info.visit_date) || !SNAPSHOT_SWHID.test(info.snapshot_swhid ?? '') || info.visit_status !== 'full') {
+      say('notice', 'the snapshot is not described completely yet (visit date, status or id missing); its records wait for the next run');
+      return;
+    }
     const listing = git(repo, ['ls-tree', '--name-only', main, 'checkpoints/']);
     for (const path of listing.split('\n').filter(Boolean)) {
       const m = CHECKPOINT_FILE.exec(path.slice('checkpoints/'.length));

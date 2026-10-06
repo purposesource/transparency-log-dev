@@ -18,7 +18,7 @@
 import { sha256Hex } from './canonical.mjs';
 import { compareKeySets } from './keys.mjs';
 import { instantMs } from './schema.mjs';
-import { SERVED_PATHS } from './spec.mjs';
+import { ENVIRONMENTS, SERVED_PATHS } from './spec.mjs';
 import { cloneState } from './state.mjs';
 import { checkpointName, readFile, verifyState } from './verify-state.mjs';
 
@@ -167,7 +167,10 @@ export function evaluate(mirrored, served, { env }) {
       const jwsBytes = Buffer.from(file.doc.jws, 'latin1');
       const held = mirrored.checkpoints.get(name);
       let accepted = false;
-      if (held && !held.equals(jwsBytes)) {
+      const fence = ENVIRONMENTS[env].kidPrefix;
+      if (!header.kid.startsWith(fence)) {
+        fileProblems.push(`${SERVED_PATHS.checkpointLatest}: signed under ${header.kid}, outside the ${env} fence (${fence}…)`);
+      } else if (held && !held.equals(jwsBytes)) {
         fileProblems.push(`checkpoints/${name}.jws is already mirrored with a different token; checkpoint files are never rewritten`);
       } else if (held) {
         accepted = true;

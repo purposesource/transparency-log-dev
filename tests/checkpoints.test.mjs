@@ -169,6 +169,14 @@ test('prod: a checkpoint signed under a psn-dev- key is refused (the S5 fence)',
   has(r.incidents, 'outside the prod fence');
 });
 
+test('prod: a psn-dev- checkpoint served beside a clean prod key set is an incident, not a quiet skip', () => {
+  const dev = world({ key: makeKey('psn-dev-2026-9') });
+  const prodKey = makeKey('psn-prod-2026-1');
+  const r = run({}, { ...dev.files, 'jwks.json': jwksFile([prodKey.entry]) }, 'prod');
+  assert.equal(r.outcome, 'incident');
+  has(r.incidents, 'ct/checkpoint-latest.json: signed under psn-dev-2026-9, outside the prod fence');
+});
+
 test('no checkpoint published yet (404) is a notice; the log and key set are still mirrored', () => {
   const files = devFixtures();
   delete files['ct/checkpoint-latest.json'];
