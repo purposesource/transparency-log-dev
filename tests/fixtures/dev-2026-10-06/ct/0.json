@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "segment": 0,
+  "startSeq": 0,
+  "prevSegmentSha256": null,
+  "entries": [
+    {
+      "seq": 0,
+      "h": "b54fda77cee84047f8d3a93e9143c5f17bcffbf22dd760b21bb9a20b23434de2",
+      "typ": "license-status",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-09-24T07:41:15Z"
+    }
+  ]
+}

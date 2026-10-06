@@ -1,0 +1,119 @@
+# The writer of this repository. Every hour it reads the transparency log through the public
+# edge, checks that the log only grew, commits once if something changed, and asks Software
+# Heritage to archive the repository. See README.md.
+#
+# Repository variables (Settings > Secrets and variables > Actions > Variables):
+#   PSN_ORIGIN  the public origin, e.g. https://api.purposesource.org (unset = switched off)
+#   PSN_ENV     prod | dev (the key fence: psn-prod- or psn-dev- kids only)
+# Environment "archive" (deployments from main only) holds the secret SWH_TOKEN. Without it the
+# mirror still commits and the Software Heritage part is skipped with a notice.
+#
+# Hygiene: actions pinned by full commit SHA; no ${{ }} expression of fetched or external
+# content inside a run script (values pass through env:); git push is plain, never forced.
+
+name: mirror
+
+on:
+  schedule:
+    - cron: "37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: transparency-log-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out main with its whole history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Commit as the Actions bot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Self-test the verifier
+        run: node --test tests/
+
+      - name: Read the log through the edge and commit what grew
+        id: mirror
+        env:
+          PSN_ORIGIN: ${{ vars.PSN_ORIGIN }}
+          PSN_ENV: ${{ vars.PSN_ENV }}
+        run: node tools/mirror.mjs --repo . --commit
+
+      - name: Push (plain, never forced)
+        if: steps.mirror.outputs.committed == 'true'
+        run: git push origin HEAD:main
+
+      - name: Open an issue for the incident
+        if: steps.mirror.outputs.incident == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tools/open-issue.mjs
+
+      - name: Check that main is protected by a ruleset
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PSN_ENV: ${{ vars.PSN_ENV }}
+        run: node tools/ruleset-check.mjs
+
+      - name: Fail the run on an incident
+        if: steps.mirror.outputs.incident == 'true'
+        run: |
+          echo "::error::The served log failed a check. The evidence is under incidents/ and an issue is open."
+          exit 1
+
+  archive:
+    needs: mirror
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: archive
+    steps:
+      - name: Check out main with its whole history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Commit as the Actions bot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Ask Software Heritage to archive the repository and record the snapshot
+        id: archive
+        env:
+          SWH_TOKEN: ${{ secrets.SWH_TOKEN }}
+          ORIGIN_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: node tools/archive.mjs --repo . --commit
+
+      - name: Push the records (plain, never forced)
+        if: steps.archive.outputs.committed == 'true'
+        run: git push origin HEAD:main
+
+      - name: Fail the run when the archive is not healthy
+        if: steps.archive.outputs.red == 'true'
+        run: exit 1
