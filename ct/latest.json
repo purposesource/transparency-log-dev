@@ -19,8 +19,24 @@
       "kind": "issue",
       "ref": null,
       "ts": "2026-10-09T08:43:36Z"
+    },
+    {
+      "seq": 2,
+      "h": "0865843902612380f06f19f5c1a70a64ae9e244eee5e227ee3c6ec337de843ff",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-12T12:14:41Z"
+    },
+    {
+      "seq": 3,
+      "h": "9801a72d61e6f1bda67c299dbaea54a56b3d39e42fb2fdc0dd1cd0921cd6ea91",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-12T18:36:36Z"
     }
   ],
-  "generatedAt": "2026-10-09T08:43:36Z",
+  "generatedAt": "2026-10-12T18:40:54Z",
   "closed": false
 }
