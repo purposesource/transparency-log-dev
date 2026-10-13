@@ -35,8 +35,40 @@
       "kind": "issue",
       "ref": null,
       "ts": "2026-10-12T18:36:36Z"
+    },
+    {
+      "seq": 4,
+      "h": "2421e2be5569e43065161edaa87aa9f97e63345a6ff1c88ef85198d2ea84fc63",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-13T02:24:24Z"
+    },
+    {
+      "seq": 5,
+      "h": "98aadf44f2bdb083e6dfa3ea0ef53f53833edc828fe31e1aec1049569733d1a1",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-13T02:24:24Z"
+    },
+    {
+      "seq": 6,
+      "h": "749d1fdba56debce4fa34668a28a99b4dc524bdf3d99173f188fb5d7fd2910d7",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-13T03:07:54Z"
+    },
+    {
+      "seq": 7,
+      "h": "36a041bce3ebbae5980d4fb4783e6c10cda58e53b4213818bdfd56c4b494171f",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-13T03:07:54Z"
     }
   ],
-  "generatedAt": "2026-10-12T18:40:54Z",
+  "generatedAt": "2026-10-13T03:07:54Z",
   "closed": false
 }
