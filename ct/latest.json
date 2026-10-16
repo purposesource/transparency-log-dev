@@ -75,8 +75,56 @@
       "kind": "issue",
       "ref": null,
       "ts": "2026-10-13T13:18:49Z"
+    },
+    {
+      "seq": 9,
+      "h": "0677a1ce04ad1e5966b153a3ae934ecbcd1562cc812bd8c708141fdcd98d35f6",
+      "typ": "license-status",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-16T07:41:53Z"
+    },
+    {
+      "seq": 10,
+      "h": "fa10491e47399b3a65a8b43fae9a2bc021bd51e4dde1ef96777ad6be316b3b34",
+      "typ": "license-status",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-16T07:42:06Z"
+    },
+    {
+      "seq": 11,
+      "h": "a871db11c9acf68e28ae9e4231e1f5702ec0e3a350a959704529a96562d9a701",
+      "typ": "license-status",
+      "kind": "revoke",
+      "ref": "0677a1ce04ad1e5966b153a3ae934ecbcd1562cc812bd8c708141fdcd98d35f6",
+      "ts": "2026-10-16T07:43:53Z"
+    },
+    {
+      "seq": 12,
+      "h": "45cfd13bd3891e45cf6f8a8f07d8ee4e2ffad0ddfda3f8f15e4162b74e5a70c6",
+      "typ": "license-status",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-16T07:44:44Z"
+    },
+    {
+      "seq": 13,
+      "h": "684e5b97102e1cd825b882d95acf327fe44a2c3b4aca8911aeea424054f68deb",
+      "typ": "license-status",
+      "kind": "revoke",
+      "ref": "fa10491e47399b3a65a8b43fae9a2bc021bd51e4dde1ef96777ad6be316b3b34",
+      "ts": "2026-10-16T07:44:55Z"
+    },
+    {
+      "seq": 14,
+      "h": "f55fb6661b1fc76cddf52125941d8fec984a845cd269933e0a854f44e94be815",
+      "typ": "license-status",
+      "kind": "revoke",
+      "ref": "45cfd13bd3891e45cf6f8a8f07d8ee4e2ffad0ddfda3f8f15e4162b74e5a70c6",
+      "ts": "2026-10-16T07:45:13Z"
     }
   ],
-  "generatedAt": "2026-10-13T15:46:53Z",
+  "generatedAt": "2026-10-16T07:45:13Z",
   "closed": false
 }
