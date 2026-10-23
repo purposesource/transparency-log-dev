@@ -123,8 +123,24 @@
       "kind": "revoke",
       "ref": "45cfd13bd3891e45cf6f8a8f07d8ee4e2ffad0ddfda3f8f15e4162b74e5a70c6",
       "ts": "2026-10-16T07:45:13Z"
+    },
+    {
+      "seq": 15,
+      "h": "f51978cdebbae6aa0cfb6fc81c8d235f59d5763f063dd609313866c1d17addc1",
+      "typ": "contributor",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-23T09:48:09Z"
+    },
+    {
+      "seq": 16,
+      "h": "71b9dfcafcb8b430edd2aaca0ed6d2c8295dcb8f4de98f9fd51832d16fde4be7",
+      "typ": "contributor",
+      "kind": "revoke",
+      "ref": "f51978cdebbae6aa0cfb6fc81c8d235f59d5763f063dd609313866c1d17addc1",
+      "ts": "2026-10-23T09:49:59Z"
     }
   ],
-  "generatedAt": "2026-10-16T07:45:13Z",
+  "generatedAt": "2026-10-23T09:53:26Z",
   "closed": false
 }
