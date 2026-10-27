@@ -24,6 +24,8 @@
 //     older snapshot than the one asked for keeps it running. Red when no full snapshot covers the target 24
 //     hours after that first ask. A token that arrives late therefore starts the clock then,
 //     not at the commit's date.
+//   - Reads and polls are anonymous; the token rides on the save request only. A token
+//     refused there (401 or 403) is a warning, and that request is sent once more without it.
 //   - 429: stop, try again next run. 401: red, the token expired or was revoked. 403: red,
 //     forbidden (the token lacks permission). Red too when the snapshot's main is not in this
 //     repository's history (history was rewritten: repair nothing).
@@ -119,7 +121,12 @@ export async function runArchive({
     return out;
   }
   const head = git(repo, ['rev-parse', 'HEAD']);
-  const client = createSwhClient({ token, fetchImpl });
+  const client = createSwhClient({
+    token,
+    fetchImpl,
+    onTokenRefused: (err) =>
+      say('warning', `Software Heritage refused the token on the save request (${err.message}): it has expired, was revoked or lacks permission. The request is sent again without it, under the anonymous rate limit. Make a new token on the Software Heritage account page and store it as the environment secret SWH_TOKEN of the environment "archive".`),
+  });
   const committedPending = readPending(repo);
   let pending = committedPending;
   let covered = false;

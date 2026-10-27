@@ -1,7 +1,11 @@
-// The Software Heritage API calls this mirror makes (plan §5). Every call carries the
-// account token as a Bearer token, reads and polls included (plan correction 7): GitHub's
-// shared runners share the anonymous budget of 120 calls an hour with everyone else, and a
-// signed-in user's budget is per user and ten times larger.
+// The Software Heritage API calls this mirror makes (plan §5). Reads and polls are
+// anonymous: Software Heritage serves them to anyone, and a token it refuses must not stop
+// them (it answers a token it no longer accepts with 403 "invalid_grant", and from 2026-10-08
+// every run went red at its first read). The account token rides on the save request only,
+// and if Software Heritage refuses it there (401 or 403), that one request is sent once more
+// without it: anonymous save requests are allowed, under the lower anonymous rate limit.
+// That budget answered 700 calls an hour on 2026-10-27 (plan correction 7 assumed 120); a
+// run makes about 25 calls, most of them the 60-second polls.
 
 import { HTTP_TIMEOUT_MS } from './runtime.mjs';
 
@@ -16,14 +20,19 @@ export class SwhError extends Error {
   }
 }
 
-export function createSwhClient({ token, fetchImpl = globalThis.fetch, base = SWH_BASE, timeoutMs = HTTP_TIMEOUT_MS }) {
-  async function call(method, path) {
+/**
+ * `onTokenRefused(err)` is told when Software Heritage refuses the token on a save request,
+ * just before that request is sent again without it. It gets the SwhError (its message names
+ * the status), never the token.
+ */
+export function createSwhClient({ token, fetchImpl = globalThis.fetch, base = SWH_BASE, timeoutMs = HTTP_TIMEOUT_MS, onTokenRefused = () => {} }) {
+  async function call(method, path, { withToken = false } = {}) {
     let res;
     try {
       res = await fetchImpl(`${base}${path}`, {
         method,
         headers: {
-          authorization: `Bearer ${token}`,
+          ...(withToken && token ? { authorization: `Bearer ${token}` } : {}),
           accept: 'application/json',
           'user-agent': 'purposesource-transparency-log-mirror',
         },
@@ -53,9 +62,20 @@ export function createSwhClient({ token, fetchImpl = globalThis.fetch, base = SW
       if (r.status !== 200 || !r.json) throw new SwhError('unexpected', `the latest-visit read was answered HTTP ${r.status}`);
       return r.json;
     },
-    /** POST a Save Code Now request for a git origin. */
+    /**
+     * POST a Save Code Now request for a git origin: the one call that carries the token. A
+     * token refused here (401 or 403) gets the request sent once more, anonymously.
+     */
     async requestSave(originUrl) {
-      const r = await call('POST', `/api/1/origin/save/?visit_type=git&origin_url=${encodeURIComponent(originUrl)}`);
+      const path = `/api/1/origin/save/?visit_type=git&origin_url=${encodeURIComponent(originUrl)}`;
+      let r;
+      try {
+        r = await call('POST', path, { withToken: true });
+      } catch (err) {
+        if (!token || !(err instanceof SwhError) || (err.kind !== 'unauthorized' && err.kind !== 'forbidden')) throw err;
+        onTokenRefused(err);
+        r = await call('POST', path);
+      }
       if ((r.status !== 200 && r.status !== 201) || !r.json || !Number.isSafeInteger(r.json.id)) {
         throw new SwhError('unexpected', `the save request was answered HTTP ${r.status}`);
       }

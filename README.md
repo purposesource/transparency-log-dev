@@ -214,9 +214,9 @@ History is never rewritten by force-pushing. If it ever were, the next commit wo
 ## Software Heritage
 
 After a commit to the log, the workflow sends a "Save Code Now" request for this repository. It
-uses the Association's Software Heritage account token, sent on every call. It polls the request
-every 60 seconds for up to 20 minutes; a request still running then is kept in `swh/state.json`
-and picked up by the next run.
+uses the Association's Software Heritage account token on that request only; every read and poll
+is anonymous, as Software Heritage allows. It polls the request every 60 seconds for up to 20
+minutes; a request still running then is kept in `swh/state.json` and picked up by the next run.
 
 A save is done when `save_task_status` is `succeeded`, `visit_status` is `full` and
 `snapshot_swhid` is set. The run then reads the snapshot and checks that its `refs/heads/main`
@@ -242,11 +242,14 @@ For each checkpoint the snapshot holds, the run writes `checkpoints/{name}.swh.j
 as Software Heritage's own revisits.
 
 A record commit is itself saved once more, and that save adds no record, so the loop stops.
-The run goes red if Software Heritage refuses the token (401: it expired or was revoked, and
-needs replacing; 403: forbidden, the token lacks permission), or if no full snapshot holds the
-newest commit 24 hours after the workflow first asked Software Heritage for it. That moment is
-kept in `swh/state.json`, so a token added late starts the clock then. A rate limit or an
-outage only delays the record.
+If Software Heritage refuses the token on the save request (401 or 403: it expired, was revoked
+or lacks permission, and needs replacing; a token Software Heritage no longer accepts is
+answered 403), the run warns and sends that request once more without the token, which Software
+Heritage accepts under a lower rate limit. The run goes red if Software Heritage refuses a call
+made without the token too (401 or 403), or if no full snapshot holds the newest commit 24 hours
+after the workflow first asked Software Heritage for it. That moment is kept in
+`swh/state.json`, so a token added late starts the clock then. A rate limit or an outage only
+delays the record.
 
 Without the token the mirror still commits, and the Software Heritage part is skipped. On the
 production repository each such run warns, and the run goes red once the first log commit is

@@ -8,6 +8,7 @@ import { test } from 'node:test';
 
 import { runArchive } from '../tools/archive.mjs';
 import { sha256Hex } from '../tools/lib/canonical.mjs';
+import { createSwhClient, SwhError } from '../tools/lib/swh.mjs';
 import { runMirror } from '../tools/mirror.mjs';
 import { devFixtures, edgeFetch, ORIGIN, silent, tempRepo } from './helpers.mjs';
 
@@ -50,6 +51,9 @@ function fakeSwh(dir, behaviour = {}) {
     const path = url.slice('https://archive.softwareheritage.org'.length);
     calls.push({ method, path, auth: init.headers?.authorization });
     if (behaviour.status) return json(behaviour.status, { exception: 'x' }, { 'x-ratelimit-reset': '1791282125' });
+    // A refused token, answered as Software Heritage answers an expired one (403 invalid_grant).
+    if (behaviour.tokenStatus && init.headers?.authorization) return json(behaviour.tokenStatus, { exception: 'AuthenticationFailed', reason: 'invalid_grant: Invalid refresh token' });
+    if (behaviour.anonSaveStatus && method === 'POST' && !init.headers?.authorization) return json(behaviour.anonSaveStatus, { exception: 'x' });
     if (method === 'GET' && path === `/api/1/origin/${ORIGIN_URL}/visit/latest/?require_snapshot=true`) return latestVisit ? json(200, latestVisit) : json(404, { exception: 'NotFoundExc' });
     if (method === 'POST' && path === `/api/1/origin/save/?visit_type=git&origin_url=${encodeURIComponent(ORIGIN_URL)}`) {
       const save = { id: nextId++, origin_url: ORIGIN_URL, save_request_status: behaviour.rejected ? 'rejected' : 'accepted', save_task_status: 'pending', visit_status: null, snapshot_swhid: '', save_request_date: new Date(behaviour.clock?.() ?? Date.now()).toISOString(), polls: 0 };
@@ -132,7 +136,7 @@ test('nothing committed to the log yet: nothing to archive, nothing called', asy
   assert.equal(swh.calls.length, 0);
 });
 
-test('good path: one save with the Bearer token on every call, polled to a full visit, and the record written beside the checkpoint', async () => {
+test('good path: one save with the Bearer token on the save request only, polled anonymously to a full visit, and the record written beside the checkpoint', async () => {
   const { dir, git } = await mirroredRepo();
   const target = git('rev-parse', 'HEAD');
   const swh = fakeSwh(dir);
@@ -140,7 +144,8 @@ test('good path: one save with the Bearer token on every call, polled to a full 
   assert.equal(out.status, 'covered');
   assert.equal(out.requests, 1);
   assert.ok(swh.calls.length >= 4);
-  assert.ok(swh.calls.every((c) => c.auth === `Bearer ${TOKEN}`), 'the token rides on reads and polls too (correction 7)');
+  assert.ok(swh.calls.filter((c) => c.method === 'POST').every((c) => c.auth === `Bearer ${TOKEN}`), 'the token rides on the save request');
+  assert.ok(swh.calls.filter((c) => c.method === 'GET').every((c) => c.auth === undefined), 'reads and polls are anonymous');
   const record = JSON.parse(readFileSync(join(dir, 'checkpoints/20261001T002021Z_0.swh.json'), 'utf8'));
   assert.deepEqual(Object.keys(record), ['checkpoint', 'origin_url', 'snapshot_swhid', 'visit_date', 'visit_status', 'save_request_id', 'save_request_url', 'mirror_commit']);
   assert.equal(record.snapshot_swhid, `swh:1:snp:${snapHex(target)}`);
@@ -269,6 +274,105 @@ test('403: red, and it says forbidden (token lacks permission), not that the tok
   const error = lines.find((l) => l.startsWith('::error::'));
   assert.ok(error.includes('forbidden (token lacks permission)'), error);
   assert.ok(!error.includes('expired or was revoked'), error);
+});
+
+test('a refused token never reaches the reads: a target already covered is green, with no warning and no token sent (the red of 2026-10-08)', async () => {
+  const { dir, git } = await mirroredRepo();
+  const head = git('rev-parse', 'HEAD');
+  const hex = snapHex(head);
+  const swh = fakeSwh(dir, { tokenStatus: 403, latestVisit: { status: 'full', snapshot: hex, date: '2026-10-23T14:16:50.816000+00:00' }, snapshots: new Map([[hex, head]]) });
+  const lines = [];
+  const out = await archive(dir, swh, { log: (l) => lines.push(l) });
+  assert.equal(out.status, 'covered');
+  assert.equal(out.red, false);
+  assert.equal(out.requests, 0);
+  assert.ok(swh.calls.length >= 2);
+  assert.ok(swh.calls.every((c) => c.auth === undefined), 'no call carried the token');
+  assert.ok(!lines.some((l) => l.startsWith('::warning::') || l.startsWith('::error::')), lines.join('\n'));
+  assert.equal(JSON.parse(readFileSync(join(dir, 'checkpoints/20261001T002021Z_0.swh.json'), 'utf8')).mirror_commit, head);
+});
+
+for (const status of [401, 403]) {
+  test(`a token refused with HTTP ${status} on the save request: a warning naming the status, never the token, and that request sent once more without it`, async () => {
+    const { dir, git } = await mirroredRepo();
+    const target = git('rev-parse', 'HEAD');
+    const swh = fakeSwh(dir, { tokenStatus: status });
+    const lines = [];
+    const out = await archive(dir, swh, { log: (l) => lines.push(l) });
+    assert.equal(out.status, 'covered');
+    assert.equal(out.red, false);
+    assert.equal(out.requests, 1, 'the anonymous resend is the same request, not a second one');
+    const posts = swh.calls.filter((c) => c.method === 'POST');
+    assert.deepEqual(posts.map((c) => c.auth), [`Bearer ${TOKEN}`, undefined]);
+    assert.ok(swh.calls.filter((c) => c.method === 'GET').every((c) => c.auth === undefined));
+    const warnings = lines.filter((l) => l.startsWith('::warning::'));
+    assert.equal(warnings.length, 1, lines.join('\n'));
+    assert.ok(warnings[0].includes(`refused the token on the save request (HTTP ${status})`), warnings[0]);
+    assert.ok(!lines.some((l) => l.includes(TOKEN)), 'the token is never printed');
+    const record = JSON.parse(readFileSync(join(dir, 'checkpoints/20261001T002021Z_0.swh.json'), 'utf8'));
+    assert.equal(record.save_request_id, 1000);
+    assert.equal(record.mirror_commit, target);
+  });
+}
+
+test('a refused token, and the save request refused without it too: red, and the token is never printed', async () => {
+  const { dir } = await mirroredRepo();
+  const swh = fakeSwh(dir, { tokenStatus: 403, anonSaveStatus: 403 });
+  const lines = [];
+  const out = await archive(dir, swh, { log: (l) => lines.push(l) });
+  assert.equal(out.red, true);
+  assert.equal(out.status, 'forbidden');
+  assert.deepEqual(swh.calls.filter((c) => c.method === 'POST').map((c) => c.auth), [`Bearer ${TOKEN}`, undefined]);
+  assert.ok(lines.some((l) => l.startsWith('::warning::') && l.includes('HTTP 403')), lines.join('\n'));
+  assert.ok(!lines.some((l) => l.includes(TOKEN)));
+});
+
+/** A fetch for the client alone: answers `statusFor(method, auth)` and records every call. */
+function scriptedFetch(statusFor) {
+  const calls = [];
+  const fn = async (url, init = {}) => {
+    calls.push({ method: init.method, url, auth: init.headers?.authorization });
+    const status = statusFor(init.method, init.headers?.authorization);
+    return new Response(JSON.stringify(status < 300 ? { id: 7 } : { exception: 'x' }), { status, headers: { 'content-type': 'application/json' } });
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+test('the client: reads carry no token; the save request carries it, and a refused token is resent once without it and reported without the token', async () => {
+  const f = scriptedFetch((method, auth) => (method === 'POST' && auth ? 403 : method === 'POST' ? 201 : 404));
+  const refused = [];
+  const client = createSwhClient({ token: TOKEN, fetchImpl: f, onTokenRefused: (err) => refused.push(err) });
+  assert.equal(await client.latestVisit(ORIGIN_URL), null);
+  assert.equal(await client.getSave(7), null);
+  assert.equal(await client.snapshotMain('0'.repeat(40)), null);
+  assert.deepEqual(f.calls.map((c) => c.auth), [undefined, undefined, undefined]);
+  assert.equal((await client.requestSave(ORIGIN_URL)).id, 7);
+  assert.deepEqual(f.calls.slice(3).map((c) => [c.method, c.auth]), [['POST', `Bearer ${TOKEN}`], ['POST', undefined]]);
+  assert.equal(refused.length, 1);
+  assert.ok(refused[0] instanceof SwhError);
+  assert.equal(refused[0].kind, 'forbidden');
+  assert.equal(refused[0].message, 'HTTP 403');
+});
+
+test('the client: a rate limit or an outage on the save request is not resent without the token', async () => {
+  for (const [status, kind] of [[429, 'rate-limited'], [503, 'unavailable']]) {
+    const f = scriptedFetch(() => status);
+    const refused = [];
+    const client = createSwhClient({ token: TOKEN, fetchImpl: f, onTokenRefused: (err) => refused.push(err) });
+    await assert.rejects(client.requestSave(ORIGIN_URL), (err) => err instanceof SwhError && err.kind === kind);
+    assert.equal(f.calls.length, 1);
+    assert.equal(refused.length, 0);
+  }
+});
+
+test('the client without a token: no authorization header at all, and a refused save request is not resent', async () => {
+  const f = scriptedFetch(() => 403);
+  const refused = [];
+  const client = createSwhClient({ token: '', fetchImpl: f, onTokenRefused: (err) => refused.push(err) });
+  await assert.rejects(client.requestSave(ORIGIN_URL), (err) => err instanceof SwhError && err.kind === 'forbidden');
+  assert.deepEqual(f.calls.map((c) => c.auth), [undefined]);
+  assert.equal(refused.length, 0);
 });
 
 test('red when no full snapshot holds the commit 24 hours after this job first asked (Software Heritage unreachable from the first try)', async () => {
