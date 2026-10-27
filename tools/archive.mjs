@@ -25,9 +25,12 @@
 //     hours after that first ask. A token that arrives late therefore starts the clock then,
 //     not at the commit's date.
 //   - Reads and polls are anonymous; the token rides on the save request only. A token
-//     refused there (401 or 403) is a warning, and that request is sent once more without it.
-//   - 429: stop, try again next run. 401: red, the token expired or was revoked. 403: red,
-//     forbidden (the token lacks permission). Red too when the snapshot's main is not in this
+//     refused there (401, or a 403 whose exception is AuthenticationFailed, as Software
+//     Heritage answers a token it no longer accepts) is a warning, and that request is sent
+//     once more without it. Any other 403 there (a blocked origin, for example) is red.
+//   - 429: stop, try again next run. Red when Software Heritage refuses a call made without
+//     the token (401 or 403: the origin may be blocked, or anonymous calls are refused from
+//     this runner; not about the token), and when the snapshot's main is not in this
 //     repository's history (history was rewritten: repair nothing).
 //   - No token: the mirror's commits still land and this part is skipped. On dev that is a
 //     notice. On prod it is a warning on every run, and red once the first log commit is more
@@ -125,7 +128,7 @@ export async function runArchive({
     token,
     fetchImpl,
     onTokenRefused: (err) =>
-      say('warning', `Software Heritage refused the token on the save request (${err.message}): it has expired, was revoked or lacks permission. The request is sent again without it, under the anonymous rate limit. Make a new token on the Software Heritage account page and store it as the environment secret SWH_TOKEN of the environment "archive".`),
+      say('warning', `Software Heritage refused the token on the save request (${err.message}): it has expired or was revoked. The request is sent again without it, under the anonymous rate limit. Make a new token on the Software Heritage account page and store it as the environment secret SWH_TOKEN of the environment "archive".`),
   });
   const committedPending = readPending(repo);
   let pending = committedPending;
@@ -260,14 +263,19 @@ export async function runArchive({
       say('error', err.message);
       out.red = true;
       out.status = 'diverged';
-    } else if (err instanceof SwhError && err.kind === 'unauthorized') {
-      say('error', `Software Heritage refused the token (${err.message}): it has expired or was revoked. Make a new token on the Software Heritage account page and store it as the environment secret SWH_TOKEN of the environment "archive".`);
+    } else if (err instanceof SwhError && (err.kind === 'unauthorized' || err.kind === 'forbidden')) {
+      // Every read and poll goes without the token, and a token refused on the save request is
+      // resent without it, so a refusal that ends the run is about the call, not the token. The
+      // one exception is a 403 on the save request that names no authentication failure.
+      const named = err.exception ? ` Software Heritage named the refusal "${err.exception}".` : '';
+      say(
+        'error',
+        err.withToken
+          ? `Software Heritage refused the save request (${err.message}) without naming an authentication failure, so the token was not refused: the origin may be blocked. Check the origin URL and Software Heritage's status page.${named}`
+          : `Software Heritage refused a call made without the token (${err.message}): the origin may be blocked, or Software Heritage refuses anonymous calls from this runner. Check the origin URL and Software Heritage's status page; this is not about the token.${named}`,
+      );
       out.red = true;
-      out.status = 'unauthorized';
-    } else if (err instanceof SwhError && err.kind === 'forbidden') {
-      say('error', `Software Heritage answered ${err.message}: forbidden (token lacks permission) for this call, or the origin is refused. Check the token's account and the origin URL; this does not mean the token expired.`);
-      out.red = true;
-      out.status = 'forbidden';
+      out.status = err.kind;
     } else if (err instanceof SwhError && err.kind === 'rate-limited') {
       const reset = Number(err.reset);
       say('notice', `Software Heritage answered 429 (rate limited${Number.isFinite(reset) && reset > 0 ? `, the budget resets at ${iso(reset * 1000)}` : ''}); stopping, the next run tries again`);

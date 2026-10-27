@@ -1,24 +1,48 @@
 // The Software Heritage API calls this mirror makes (plan §5). Reads and polls are
 // anonymous: Software Heritage serves them to anyone, and a token it refuses must not stop
-// them (it answers a token it no longer accepts with 403 "invalid_grant", and from 2026-10-08
-// every run went red at its first read). The account token rides on the save request only,
-// and if Software Heritage refuses it there (401 or 403), that one request is sent once more
-// without it: anonymous save requests are allowed, under the lower anonymous rate limit.
-// That budget answered 700 calls an hour on 2026-10-27 (plan correction 7 assumed 120); a
-// run makes about 25 calls, most of them the 60-second polls.
+// them (it answers a token it no longer accepts with 403 AuthenticationFailed
+// "invalid_grant", and from 2026-10-08 every run went red at its first read). The account
+// token rides on the save request only. If Software Heritage refuses it there as a token
+// (401, or a 403 whose exception is AuthenticationFailed), that one request is sent once more
+// without it: anonymous save requests are allowed. Any other 403 there (a blocked origin, for
+// example) is not about the token and is thrown as it is.
+//
+// The anonymous budgets, as measured on 2026-10-27: the latest-visit read has its own budget
+// of 700 a minute; snapshot reads and save polls share a budget of 120 an hour per IP; the
+// anonymous save request's budget was not measured. A run makes about 22 calls an hour, most
+// of them the 60-second polls, which fits; a 429 only delays the record.
 
 import { HTTP_TIMEOUT_MS } from './runtime.mjs';
 
 export const SWH_BASE = 'https://archive.softwareheritage.org';
 
 export class SwhError extends Error {
-  /** kind: unauthorized (401) | forbidden (403) | rate-limited | unavailable | unexpected */
+  /**
+   * kind: unauthorized (401) | forbidden (403) | rate-limited | unavailable | unexpected.
+   * A refusal (401, 403, 429) also carries `exception`, the exception Software Heritage named
+   * in its JSON body (AuthenticationFailed for a refused token), or null, and `withToken`,
+   * whether the refused call carried the token.
+   */
   constructor(kind, message, extra = {}) {
     super(message);
     this.kind = kind;
     Object.assign(this, extra);
   }
 }
+
+/** The exception Software Heritage names in a refusal's JSON body, or null. Never more than a name. */
+async function exceptionOf(res) {
+  try {
+    const exception = (await res.json())?.exception;
+    return typeof exception === 'string' && /^[A-Za-z][A-Za-z0-9_.]{0,63}$/.test(exception) ? exception : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A refusal of the token itself: 401, or a 403 whose exception is AuthenticationFailed. */
+const tokenRefused = (err) =>
+  err instanceof SwhError && (err.kind === 'unauthorized' || (err.kind === 'forbidden' && err.exception === 'AuthenticationFailed'));
 
 /**
  * `onTokenRefused(err)` is told when Software Heritage refuses the token on a save request,
@@ -41,9 +65,10 @@ export function createSwhClient({ token, fetchImpl = globalThis.fetch, base = SW
     } catch (err) {
       throw new SwhError('unavailable', err?.name === 'TimeoutError' ? `no answer within ${timeoutMs / 1000} s` : 'the request failed');
     }
-    if (res.status === 401) throw new SwhError('unauthorized', 'HTTP 401');
-    if (res.status === 403) throw new SwhError('forbidden', 'HTTP 403');
-    if (res.status === 429) throw new SwhError('rate-limited', 'HTTP 429', { reset: res.headers.get('x-ratelimit-reset') });
+    const refusal = { withToken: Boolean(withToken && token) };
+    if (res.status === 401) throw new SwhError('unauthorized', 'HTTP 401', { ...refusal, exception: await exceptionOf(res) });
+    if (res.status === 403) throw new SwhError('forbidden', 'HTTP 403', { ...refusal, exception: await exceptionOf(res) });
+    if (res.status === 429) throw new SwhError('rate-limited', 'HTTP 429', { ...refusal, exception: await exceptionOf(res), reset: res.headers.get('x-ratelimit-reset') });
     if (res.status >= 500) throw new SwhError('unavailable', `HTTP ${res.status}`);
     let json = null;
     try {
@@ -64,7 +89,8 @@ export function createSwhClient({ token, fetchImpl = globalThis.fetch, base = SW
     },
     /**
      * POST a Save Code Now request for a git origin: the one call that carries the token. A
-     * token refused here (401 or 403) gets the request sent once more, anonymously.
+     * token refused here (401, or 403 AuthenticationFailed) gets the request sent once more,
+     * anonymously; any other refusal is thrown as it is.
      */
     async requestSave(originUrl) {
       const path = `/api/1/origin/save/?visit_type=git&origin_url=${encodeURIComponent(originUrl)}`;
@@ -72,7 +98,7 @@ export function createSwhClient({ token, fetchImpl = globalThis.fetch, base = SW
       try {
         r = await call('POST', path, { withToken: true });
       } catch (err) {
-        if (!token || !(err instanceof SwhError) || (err.kind !== 'unauthorized' && err.kind !== 'forbidden')) throw err;
+        if (!token || !tokenRefused(err)) throw err;
         onTokenRefused(err);
         r = await call('POST', path);
       }

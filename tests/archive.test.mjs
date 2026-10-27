@@ -51,8 +51,9 @@ function fakeSwh(dir, behaviour = {}) {
     const path = url.slice('https://archive.softwareheritage.org'.length);
     calls.push({ method, path, auth: init.headers?.authorization });
     if (behaviour.status) return json(behaviour.status, { exception: 'x' }, { 'x-ratelimit-reset': '1791282125' });
-    // A refused token, answered as Software Heritage answers an expired one (403 invalid_grant).
-    if (behaviour.tokenStatus && init.headers?.authorization) return json(behaviour.tokenStatus, { exception: 'AuthenticationFailed', reason: 'invalid_grant: Invalid refresh token' });
+    // A refused token, answered as Software Heritage answers an expired one (403 invalid_grant),
+    // or, with `tokenException`, a call with the token refused for another reason.
+    if (behaviour.tokenStatus && init.headers?.authorization) return json(behaviour.tokenStatus, { exception: behaviour.tokenException ?? 'AuthenticationFailed', reason: 'invalid_grant: Invalid refresh token' });
     if (behaviour.anonSaveStatus && method === 'POST' && !init.headers?.authorization) return json(behaviour.anonSaveStatus, { exception: 'x' });
     if (method === 'GET' && path === `/api/1/origin/${ORIGIN_URL}/visit/latest/?require_snapshot=true`) return latestVisit ? json(200, latestVisit) : json(404, { exception: 'NotFoundExc' });
     if (method === 'POST' && path === `/api/1/origin/save/?visit_type=git&origin_url=${encodeURIComponent(ORIGIN_URL)}`) {
@@ -257,24 +258,23 @@ test('429: stop, no red, try again next run', async () => {
   assert.ok(lines.some((l) => l.includes('429')));
 });
 
-test('401: red, asking for a new token', async () => {
-  const { dir } = await mirroredRepo();
-  const lines = [];
-  const out = await archive(dir, fakeSwh(dir, { status: 401 }), { log: (l) => lines.push(l) });
-  assert.equal(out.red, true);
-  assert.ok(lines.some((l) => l.startsWith('::error::') && l.includes('new token')));
-});
-
-test('403: red, and it says forbidden (token lacks permission), not that the token expired', async () => {
-  const { dir } = await mirroredRepo();
-  const lines = [];
-  const out = await archive(dir, fakeSwh(dir, { status: 403 }), { log: (l) => lines.push(l) });
-  assert.equal(out.red, true);
-  assert.equal(out.status, 'forbidden');
-  const error = lines.find((l) => l.startsWith('::error::'));
-  assert.ok(error.includes('forbidden (token lacks permission)'), error);
-  assert.ok(!error.includes('expired or was revoked'), error);
-});
+for (const [status, kind] of [[401, 'unauthorized'], [403, 'forbidden']]) {
+  test(`${status} on a call made without the token: red (${kind}), and it says so, that the token is not the cause, and asks for no new token`, async () => {
+    const { dir } = await mirroredRepo();
+    const swh = fakeSwh(dir, { status });
+    const lines = [];
+    const out = await archive(dir, swh, { log: (l) => lines.push(l) });
+    assert.equal(out.red, true);
+    assert.equal(out.status, kind);
+    assert.ok(swh.calls.length >= 1 && swh.calls.every((c) => c.auth === undefined), 'the refused call went without the token');
+    const error = lines.find((l) => l.startsWith('::error::'));
+    assert.ok(error, lines.join('\n'));
+    assert.ok(error.includes(`Software Heritage refused a call made without the token (HTTP ${status})`), error);
+    assert.ok(error.includes('this is not about the token'), error);
+    assert.ok(!error.includes('new token') && !error.includes('expired') && !error.includes('lacks permission'), error);
+    assert.ok(!lines.some((l) => l.includes(TOKEN)), 'the token appears in no line');
+  });
+}
 
 test('a refused token never reaches the reads: a target already covered is green, with no warning and no token sent (the red of 2026-10-08)', async () => {
   const { dir, git } = await mirroredRepo();
@@ -315,7 +315,7 @@ for (const status of [401, 403]) {
   });
 }
 
-test('a refused token, and the save request refused without it too: red, and the token is never printed', async () => {
+test('a refused token, and the save request refused without it too: red, the error is about the call made without the token, and the token is never printed', async () => {
   const { dir } = await mirroredRepo();
   const swh = fakeSwh(dir, { tokenStatus: 403, anonSaveStatus: 403 });
   const lines = [];
@@ -324,23 +324,48 @@ test('a refused token, and the save request refused without it too: red, and the
   assert.equal(out.status, 'forbidden');
   assert.deepEqual(swh.calls.filter((c) => c.method === 'POST').map((c) => c.auth), [`Bearer ${TOKEN}`, undefined]);
   assert.ok(lines.some((l) => l.startsWith('::warning::') && l.includes('HTTP 403')), lines.join('\n'));
+  const error = lines.find((l) => l.startsWith('::error::'));
+  assert.ok(error, lines.join('\n'));
+  assert.ok(error.includes('Software Heritage refused a call made without the token (HTTP 403)'), error);
+  assert.ok(!error.includes('expired'), 'the error does not contradict the warning about the token');
   assert.ok(!lines.some((l) => l.includes(TOKEN)));
 });
 
-/** A fetch for the client alone: answers `statusFor(method, auth)` and records every call. */
-function scriptedFetch(statusFor) {
+test('a 403 on the save request that names no authentication failure (a blocked origin): red, no warning about the token, and not resent without it', async () => {
+  const { dir } = await mirroredRepo();
+  const swh = fakeSwh(dir, { tokenStatus: 403, tokenException: 'ForbiddenExc' });
+  const lines = [];
+  const out = await archive(dir, swh, { log: (l) => lines.push(l) });
+  assert.equal(out.red, true);
+  assert.equal(out.status, 'forbidden');
+  assert.deepEqual(swh.calls.filter((c) => c.method === 'POST').map((c) => c.auth), [`Bearer ${TOKEN}`], 'sent once, with the token');
+  assert.ok(!lines.some((l) => l.startsWith('::warning::')), lines.join('\n'));
+  const error = lines.find((l) => l.startsWith('::error::'));
+  assert.ok(error, lines.join('\n'));
+  assert.ok(error.includes('refused the save request (HTTP 403) without naming an authentication failure, so the token was not refused'), error);
+  assert.ok(error.includes('"ForbiddenExc"'), error);
+  assert.ok(!error.includes('new token') && !error.includes('made without the token'), error);
+  assert.ok(!lines.some((l) => l.includes(TOKEN)), 'the token appears in no line');
+});
+
+/**
+ * A fetch for the client alone: answers `statusFor(method, auth)` and records every call. A
+ * refusal's body names `exception`; with `exception` null it has no body at all.
+ */
+function scriptedFetch(statusFor, exception = 'x') {
   const calls = [];
   const fn = async (url, init = {}) => {
     calls.push({ method: init.method, url, auth: init.headers?.authorization });
     const status = statusFor(init.method, init.headers?.authorization);
-    return new Response(JSON.stringify(status < 300 ? { id: 7 } : { exception: 'x' }), { status, headers: { 'content-type': 'application/json' } });
+    const body = status < 300 ? JSON.stringify({ id: 7 }) : exception === null ? '' : JSON.stringify({ exception });
+    return new Response(body, { status, headers: { 'content-type': 'application/json' } });
   };
   fn.calls = calls;
   return fn;
 }
 
-test('the client: reads carry no token; the save request carries it, and a refused token is resent once without it and reported without the token', async () => {
-  const f = scriptedFetch((method, auth) => (method === 'POST' && auth ? 403 : method === 'POST' ? 201 : 404));
+test('the client: reads carry no token; the save request carries it, and a refused token (403 AuthenticationFailed) is resent once without it and reported without the token', async () => {
+  const f = scriptedFetch((method, auth) => (method === 'POST' && auth ? 403 : method === 'POST' ? 201 : 404), 'AuthenticationFailed');
   const refused = [];
   const client = createSwhClient({ token: TOKEN, fetchImpl: f, onTokenRefused: (err) => refused.push(err) });
   assert.equal(await client.latestVisit(ORIGIN_URL), null);
@@ -353,6 +378,30 @@ test('the client: reads carry no token; the save request carries it, and a refus
   assert.ok(refused[0] instanceof SwhError);
   assert.equal(refused[0].kind, 'forbidden');
   assert.equal(refused[0].message, 'HTTP 403');
+  assert.equal(refused[0].exception, 'AuthenticationFailed');
+  assert.equal(refused[0].withToken, true);
+});
+
+test('the client: a 401 on the save request is a refused token whatever its body, and is resent once without it', async () => {
+  const f = scriptedFetch((method, auth) => (auth ? 401 : 201), null);
+  const refused = [];
+  const client = createSwhClient({ token: TOKEN, fetchImpl: f, onTokenRefused: (err) => refused.push(err) });
+  assert.equal((await client.requestSave(ORIGIN_URL)).id, 7);
+  assert.deepEqual(f.calls.map((c) => c.auth), [`Bearer ${TOKEN}`, undefined]);
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0].kind, 'unauthorized');
+  assert.equal(refused[0].exception, null);
+});
+
+test('the client: a 403 on the save request whose exception is not AuthenticationFailed (a blocked origin) is thrown as it is, with its exception, and not resent', async () => {
+  for (const exception of ['ForbiddenExc', null]) {
+    const f = scriptedFetch((method, auth) => (auth ? 403 : 201), exception);
+    const refused = [];
+    const client = createSwhClient({ token: TOKEN, fetchImpl: f, onTokenRefused: (err) => refused.push(err) });
+    await assert.rejects(client.requestSave(ORIGIN_URL), (err) => err instanceof SwhError && err.kind === 'forbidden' && err.exception === exception && err.withToken === true);
+    assert.deepEqual(f.calls.map((c) => c.auth), [`Bearer ${TOKEN}`]);
+    assert.equal(refused.length, 0);
+  }
 });
 
 test('the client: a rate limit or an outage on the save request is not resent without the token', async () => {
@@ -370,7 +419,7 @@ test('the client without a token: no authorization header at all, and a refused 
   const f = scriptedFetch(() => 403);
   const refused = [];
   const client = createSwhClient({ token: '', fetchImpl: f, onTokenRefused: (err) => refused.push(err) });
-  await assert.rejects(client.requestSave(ORIGIN_URL), (err) => err instanceof SwhError && err.kind === 'forbidden');
+  await assert.rejects(client.requestSave(ORIGIN_URL), (err) => err instanceof SwhError && err.kind === 'forbidden' && err.withToken === false);
   assert.deepEqual(f.calls.map((c) => c.auth), [undefined]);
   assert.equal(refused.length, 0);
 });

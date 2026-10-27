@@ -242,14 +242,16 @@ For each checkpoint the snapshot holds, the run writes `checkpoints/{name}.swh.j
 as Software Heritage's own revisits.
 
 A record commit is itself saved once more, and that save adds no record, so the loop stops.
-If Software Heritage refuses the token on the save request (401 or 403: it expired, was revoked
-or lacks permission, and needs replacing; a token Software Heritage no longer accepts is
-answered 403), the run warns and sends that request once more without the token, which Software
-Heritage accepts under a lower rate limit. The run goes red if Software Heritage refuses a call
-made without the token too (401 or 403), or if no full snapshot holds the newest commit 24 hours
-after the workflow first asked Software Heritage for it. That moment is kept in
-`swh/state.json`, so a token added late starts the clock then. A rate limit or an outage only
-delays the record.
+If Software Heritage refuses the token on the save request (401, or 403 with the exception
+`AuthenticationFailed`, which is how it answers a token it no longer accepts: the token expired
+or was revoked, and needs replacing), the run warns and sends that request once more without the
+token, which Software Heritage accepts under a lower rate limit. Any other 403 on the save
+request (a blocked origin, for example) is red. The run goes red too if Software Heritage
+refuses a call made without the token (401 or 403: the origin may be blocked, or anonymous calls
+are refused from the runner; the token is not the cause), or if no full snapshot holds the
+newest commit 24 hours after the workflow first asked Software Heritage for it. That moment is
+kept in `swh/state.json`, so a token added late starts the clock then. A rate limit or an
+outage only delays the record.
 
 Without the token the mirror still commits, and the Software Heritage part is skipped. On the
 production repository each such run warns, and the run goes red once the first log commit is
