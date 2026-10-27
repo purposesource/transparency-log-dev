@@ -139,8 +139,24 @@
       "kind": "revoke",
       "ref": "f51978cdebbae6aa0cfb6fc81c8d235f59d5763f063dd609313866c1d17addc1",
       "ts": "2026-10-23T09:49:59Z"
+    },
+    {
+      "seq": 17,
+      "h": "072ca2b87a490c86c00b9ba6af497d200bab13fa6f945bf30665e64558961bd5",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-27T21:12:34Z"
+    },
+    {
+      "seq": 18,
+      "h": "fe06da1577ac1ca50760165388ae26dfbaa973eb217e11ad976a61f5d1f1731e",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-27T21:12:34Z"
     }
   ],
-  "generatedAt": "2026-10-23T09:53:26Z",
+  "generatedAt": "2026-10-27T21:12:34Z",
   "closed": false
 }
