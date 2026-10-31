@@ -163,8 +163,16 @@
       "kind": "revoke",
       "ref": "fe06da1577ac1ca50760165388ae26dfbaa973eb217e11ad976a61f5d1f1731e",
       "ts": "2026-10-28T08:40:56Z"
+    },
+    {
+      "seq": 20,
+      "h": "08054e96ea6d3eacc89242802e525ac262ea015950df16b7cf6a1c9bae693a9d",
+      "typ": "license-status",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-31T07:49:17Z"
     }
   ],
-  "generatedAt": "2026-10-28T08:40:56Z",
+  "generatedAt": "2026-10-31T07:49:17Z",
   "closed": false
 }
