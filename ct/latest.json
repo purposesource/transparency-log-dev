@@ -171,8 +171,40 @@
       "kind": "issue",
       "ref": null,
       "ts": "2026-10-31T07:49:17Z"
+    },
+    {
+      "seq": 21,
+      "h": "c7e4653b32722b3525182acac24f66a745566b4914d2135a897cf109b1c9794e",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-01T11:09:26Z"
+    },
+    {
+      "seq": 22,
+      "h": "05fc9d5d1ecd353c7a45df300e97341fac4b9038ddea211af88d6fe2f4fa46b2",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-01T11:13:16Z"
+    },
+    {
+      "seq": 23,
+      "h": "2bd7509059d9d9de402f1795f07e61164c5c600e64872e690a08a5ae9471e3e3",
+      "typ": "contributor",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-01T11:55:27Z"
+    },
+    {
+      "seq": 24,
+      "h": "aada2398384b836e1404b2069556ea9ce39eefd341c3899bd2178d1880ef3524",
+      "typ": "contributor",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-01T14:13:34Z"
     }
   ],
-  "generatedAt": "2026-11-01T00:20:27Z",
+  "generatedAt": "2026-11-01T14:13:34Z",
   "closed": false
 }
