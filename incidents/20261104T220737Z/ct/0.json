@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 1,
+  "segment": 0,
+  "startSeq": 0,
+  "prevSegmentSha256": null,
+  "entries": [
+    {
+      "seq": 0,
+      "h": "b54fda77cee84047f8d3a93e9143c5f17bcffbf22dd760b21bb9a20b23434de2",
+      "typ": "license-status",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-09-24T07:41:15Z"
+    },
+    {
+      "seq": 1,
+      "h": "2f03420a74c893612dc797458a470411a12ba2d1bbc9ab7f17bc1c7f895e5233",
+      "typ": "contributor",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-09T08:43:36Z"
+    },
+    {
+      "seq": 2,
+      "h": "0865843902612380f06f19f5c1a70a64ae9e244eee5e227ee3c6ec337de843ff",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-12T12:14:41Z"
+    },
+    {
+      "seq": 3,
+      "h": "9801a72d61e6f1bda67c299dbaea54a56b3d39e42fb2fdc0dd1cd0921cd6ea91",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-12T18:36:36Z"
+    },
+    {
+      "seq": 4,
+      "h": "2421e2be5569e43065161edaa87aa9f97e63345a6ff1c88ef85198d2ea84fc63",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-13T02:24:24Z"
+    },
+    {
+      "seq": 5,
+      "h": "98aadf44f2bdb083e6dfa3ea0ef53f53833edc828fe31e1aec1049569733d1a1",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-13T02:24:24Z"
+    },
+    {
+      "seq": 6,
+      "h": "749d1fdba56debce4fa34668a28a99b4dc524bdf3d99173f188fb5d7fd2910d7",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-13T03:07:54Z"
+    },
+    {
+      "seq": 7,
+      "h": "36a041bce3ebbae5980d4fb4783e6c10cda58e53b4213818bdfd56c4b494171f",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-13T03:07:54Z"
+    },
+    {
+      "seq": 8,
+      "h": "5a016678697a1f0150e1d8d1a47b80c4aba0c09e94a31e88c9d9553e402a37d6",
+      "typ": "contributor",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-13T13:18:49Z"
+    },
+    {
+      "seq": 9,
+      "h": "0677a1ce04ad1e5966b153a3ae934ecbcd1562cc812bd8c708141fdcd98d35f6",
+      "typ": "license-status",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-16T07:41:53Z"
+    },
+    {
+      "seq": 10,
+      "h": "fa10491e47399b3a65a8b43fae9a2bc021bd51e4dde1ef96777ad6be316b3b34",
+      "typ": "license-status",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-16T07:42:06Z"
+    },
+    {
+      "seq": 11,
+      "h": "a871db11c9acf68e28ae9e4231e1f5702ec0e3a350a959704529a96562d9a701",
+      "typ": "license-status",
+      "kind": "revoke",
+      "ref": "0677a1ce04ad1e5966b153a3ae934ecbcd1562cc812bd8c708141fdcd98d35f6",
+      "ts": "2026-10-16T07:43:53Z"
+    },
+    {
+      "seq": 12,
+      "h": "45cfd13bd3891e45cf6f8a8f07d8ee4e2ffad0ddfda3f8f15e4162b74e5a70c6",
+      "typ": "license-status",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-16T07:44:44Z"
+    },
+    {
+      "seq": 13,
+      "h": "684e5b97102e1cd825b882d95acf327fe44a2c3b4aca8911aeea424054f68deb",
+      "typ": "license-status",
+      "kind": "revoke",
+      "ref": "fa10491e47399b3a65a8b43fae9a2bc021bd51e4dde1ef96777ad6be316b3b34",
+      "ts": "2026-10-16T07:44:55Z"
+    },
+    {
+      "seq": 14,
+      "h": "f55fb6661b1fc76cddf52125941d8fec984a845cd269933e0a854f44e94be815",
+      "typ": "license-status",
+      "kind": "revoke",
+      "ref": "45cfd13bd3891e45cf6f8a8f07d8ee4e2ffad0ddfda3f8f15e4162b74e5a70c6",
+      "ts": "2026-10-16T07:45:13Z"
+    },
+    {
+      "seq": 15,
+      "h": "f51978cdebbae6aa0cfb6fc81c8d235f59d5763f063dd609313866c1d17addc1",
+      "typ": "contributor",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-23T09:48:09Z"
+    },
+    {
+      "seq": 16,
+      "h": "71b9dfcafcb8b430edd2aaca0ed6d2c8295dcb8f4de98f9fd51832d16fde4be7",
+      "typ": "contributor",
+      "kind": "revoke",
+      "ref": "f51978cdebbae6aa0cfb6fc81c8d235f59d5763f063dd609313866c1d17addc1",
+      "ts": "2026-10-23T09:49:59Z"
+    },
+    {
+      "seq": 17,
+      "h": "072ca2b87a490c86c00b9ba6af497d200bab13fa6f945bf30665e64558961bd5",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-27T21:12:34Z"
+    },
+    {
+      "seq": 18,
+      "h": "fe06da1577ac1ca50760165388ae26dfbaa973eb217e11ad976a61f5d1f1731e",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-27T21:12:34Z"
+    },
+    {
+      "seq": 19,
+      "h": "6428b01fd70a721e893e4d00de7ccf5f64b00bf882e6e5f96773e15ab3efcf86",
+      "typ": "supporter",
+      "kind": "revoke",
+      "ref": "fe06da1577ac1ca50760165388ae26dfbaa973eb217e11ad976a61f5d1f1731e",
+      "ts": "2026-10-28T08:40:56Z"
+    },
+    {
+      "seq": 20,
+      "h": "08054e96ea6d3eacc89242802e525ac262ea015950df16b7cf6a1c9bae693a9d",
+      "typ": "license-status",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-10-31T07:49:17Z"
+    },
+    {
+      "seq": 21,
+      "h": "c7e4653b32722b3525182acac24f66a745566b4914d2135a897cf109b1c9794e",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-01T11:09:26Z"
+    },
+    {
+      "seq": 22,
+      "h": "05fc9d5d1ecd353c7a45df300e97341fac4b9038ddea211af88d6fe2f4fa46b2",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-01T11:13:16Z"
+    },
+    {
+      "seq": 23,
+      "h": "2bd7509059d9d9de402f1795f07e61164c5c600e64872e690a08a5ae9471e3e3",
+      "typ": "contributor",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-01T11:55:27Z"
+    },
+    {
+      "seq": 24,
+      "h": "aada2398384b836e1404b2069556ea9ce39eefd341c3899bd2178d1880ef3524",
+      "typ": "contributor",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-01T14:13:34Z"
+    }
+  ]
+}

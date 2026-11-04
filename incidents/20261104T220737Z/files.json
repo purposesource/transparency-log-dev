@@ -1,0 +1,39 @@
+{
+  "detectedAt": "2026-11-04T22:07:37Z",
+  "origin": "https://dev-api.purposesource.org",
+  "env": "dev",
+  "fingerprint": "306046b12a8a7f05113bf3dfb6b17672d0cfe60865d89315e495292302381995",
+  "reasons": [
+    "jwks.json keys[1]: `psn:status` is not active, retired or compromised"
+  ],
+  "files": [
+    {
+      "path": "ct/latest.json",
+      "url": "https://dev-api.purposesource.org/ct/latest.json",
+      "sha256": "f32932484a5f50b22261222069d7f4fcc00f4e979c8e755d29e0ce5b8cae01da",
+      "kept": true,
+      "withheldBecause": null
+    },
+    {
+      "path": "ct/0.json",
+      "url": "https://dev-api.purposesource.org/ct/0.json",
+      "sha256": "c03134c4b4f1c461e2682341545a3ce2502514a45b9a03226b6b7c1c05dc40bc",
+      "kept": true,
+      "withheldBecause": null
+    },
+    {
+      "path": "jwks.json",
+      "url": "https://dev-api.purposesource.org/jwks.json",
+      "sha256": "a02315e5975a4c0f8d795d1ad021f456951cf8d03e3506a400fab3e67cbfb117",
+      "kept": false,
+      "withheldBecause": "jwks.json keys[1]: `psn:status` is not active, retired or compromised"
+    },
+    {
+      "path": "ct/checkpoint-latest.json",
+      "url": "https://dev-api.purposesource.org/ct/checkpoint-latest.json",
+      "sha256": "57e51ab1a458712db611b34df91db10587ce3bc78b2f39be34016f6ed6f59f46",
+      "kept": true,
+      "withheldBecause": null
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-01T00:20:27Z",
+  "jws": "eyJhbGciOiJFUzI1NiIsImtpZCI6InBzbi1kZXYtMjAyNi0yIiwidHlwIjoiYXBwbGljYXRpb24vcHNuLWN0LWNoZWNrcG9pbnQrandzIn0.eyJhc09mIjoiMjAyNi0xMS0wMVQwMDoyMDoxOFoiLCJoZWFkU2VnbWVudCI6MCwiaGVhZFNlZ21lbnRTaGEyNTYiOiIzYzY2MTZlMmZiMDE0OTU4ODJhNjhlY2Y3YjZiMzM4OTAyNzM5NjM5YzNiN2YzN2M2MTY1YTdjZWQzYmNmOWUyIiwiaGVhZFNlcSI6MjAsImlzcyI6Imh0dHBzOi8vZGV2LWFwaS5wdXJwb3Nlc291cmNlLm9yZyIsImtpZCI6InBzbi1kZXYtMjAyNi0yIn0.D--C90bzUprHlhyRYT-s05w6MOmfBAlgotLIeUpuAzhfS0ycgrk1Ggr-HlJbB64KIEHKfTxCTUQSDl60Zy_TTQ",
+  "payload": {
+    "asOf": "2026-11-01T00:20:18Z",
+    "headSeq": 20,
+    "headSegment": 0,
+    "headSegmentSha256": "3c6616e2fb01495882a68ecf7b6b338902739639c3b7f37c6165a7ced3bcf9e2",
+    "kid": "psn-dev-2026-2",
+    "iss": "https://dev-api.purposesource.org"
+  }
+}
