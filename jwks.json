@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-01T14:13:34Z",
+  "generatedAt": "2026-11-05T00:54:11Z",
   "keys": [
     {
       "kty": "EC",
@@ -10,9 +10,23 @@
       "kid": "psn-dev-2026-2",
       "alg": "ES256",
       "use": "sig",
-      "psn:status": "active",
+      "psn:status": "retired",
       "psn:validityWindow": {
         "notBefore": "2026-09-24T00:00:00Z",
+        "notAfter": "2026-11-04T23:24:00Z"
+      }
+    },
+    {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "DPjI3CZN_HC04UnidzodT2RiaSY7fjn_TgVOvVEuo8k",
+      "y": "qtm8JiqpYGIN39NkGxKbBOItiIw8FlCopeKBHMJ3NoY",
+      "kid": "psn-dev-2026-3",
+      "alg": "ES256",
+      "use": "sig",
+      "psn:status": "active",
+      "psn:validityWindow": {
+        "notBefore": "2026-11-04T23:24:00Z",
         "notAfter": null
       }
     }

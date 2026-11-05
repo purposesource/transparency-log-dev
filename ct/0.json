@@ -203,6 +203,38 @@
       "kind": "issue",
       "ref": null,
       "ts": "2026-11-01T14:13:34Z"
+    },
+    {
+      "seq": 25,
+      "h": "b729c3070e61da76cd81a87567dc04c27f5e7f58c9b61dc1968e6c7315f513ad",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-04T23:56:04Z"
+    },
+    {
+      "seq": 26,
+      "h": "563b0f4e107e15e540551b806a9aef70a02480c2516a775617f2d83e7de2acfb",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-04T23:56:04Z"
+    },
+    {
+      "seq": 27,
+      "h": "18919c1d88c0cd5ecc6749197191ddf7c2f479edff55c17ac386ed333c3267fb",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-05T00:54:11Z"
+    },
+    {
+      "seq": 28,
+      "h": "edfea28b4fb98dcbe4e845572b98785d1fca8db757ae74deb24a4bc833d64a88",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-05T00:54:11Z"
     }
   ]
 }
