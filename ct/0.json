@@ -235,6 +235,54 @@
       "kind": "issue",
       "ref": null,
       "ts": "2026-11-05T00:54:11Z"
+    },
+    {
+      "seq": 29,
+      "h": "f672683d6db53ff14a126fc65ef5587884262700bf5018d2e4ce5d1550148009",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-06T09:04:19Z"
+    },
+    {
+      "seq": 30,
+      "h": "32e1d84b6186b14acd92777fffadc027e80c74f6a207b8111025972ecf700c26",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-06T09:04:19Z"
+    },
+    {
+      "seq": 31,
+      "h": "1b5b2be89dbde7870e0eee221caaf5bd038112cf6f1695bf42a63a220bbcdd63",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-06T09:25:30Z"
+    },
+    {
+      "seq": 32,
+      "h": "d935af0016d7d21d6a8ecf1f3ac886ae6b6c5ba5b2218e097a289c4271802a24",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-06T09:25:30Z"
+    },
+    {
+      "seq": 33,
+      "h": "df5c1bf8d159f63e83c417603ded29de245f84e7a3e8b6bee5109b844fd22813",
+      "typ": "entitlement-record",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-06T09:54:21Z"
+    },
+    {
+      "seq": 34,
+      "h": "cdb37c856562db43aa18f6fedd5e5e900872970e1e7772c8a447929a7b33a6a2",
+      "typ": "supporter",
+      "kind": "issue",
+      "ref": null,
+      "ts": "2026-11-06T09:54:21Z"
     }
   ]
 }
