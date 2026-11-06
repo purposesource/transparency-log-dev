@@ -10,7 +10,7 @@ import { runArchive } from '../tools/archive.mjs';
 import { sha256Hex } from '../tools/lib/canonical.mjs';
 import { createSwhClient, SwhError } from '../tools/lib/swh.mjs';
 import { runMirror } from '../tools/mirror.mjs';
-import { devFixtures, edgeFetch, ORIGIN, silent, tempRepo } from './helpers.mjs';
+import { checkpointArtifact, checkpointPayload, devFixtures, edgeFetch, issueEntries, jwksFile, makeKey, ORIGIN, renderLog, signToken, silent, tempRepo, tsAt } from './helpers.mjs';
 
 const ORIGIN_URL = 'https://github.com/purposesource/transparency-log-dev';
 const TOKEN = 'test-token-not-a-secret';
@@ -184,6 +184,123 @@ test('covered already by a full visit (webhook or revisit): no save request; a m
   const record = JSON.parse(readFileSync(join(dir, 'checkpoints/20261001T002021Z_0.swh.json'), 'utf8'));
   assert.equal(record.save_request_id, null);
   assert.equal(record.save_request_url, null);
+});
+
+/**
+ * A repository the mirror writes checkpoints into. `adopt(headSeq, asOf)` is one mirror run
+ * whose edge serves the same six entries and a checkpoint at headSeq, so
+ * ct/checkpoint-latest.json moves to it; it returns the mirror's commit.
+ */
+function checkpointMirror() {
+  const repo = tempRepo();
+  const key = makeKey();
+  const entries = issueEntries(6);
+  const files = { ...renderLog(entries), 'jwks.json': jwksFile([key.entry]) };
+  const adopt = async (headSeq, asOf) => {
+    const payload = checkpointPayload(key, entries, headSeq, asOf);
+    const served = { ...files, 'ct/checkpoint-latest.json': checkpointArtifact(signToken(key, payload), payload) };
+    const run = await runMirror({ repo: repo.dir, origin: ORIGIN, env: 'dev', fetchImpl: edgeFetch(served), commit: true, log: silent });
+    assert.equal(run.committed, true, `the mirror adopts the checkpoint at head seq ${headSeq}`);
+    return repo.git('rev-parse', 'HEAD');
+  };
+  return { ...repo, adopt };
+}
+
+/**
+ * A repository the mirror has written two checkpoints into, in two runs: the first edge serves
+ * 20261001T000030Z_3, the next serves 20261001T000040Z_5, and ct/checkpoint-latest.json moves
+ * to it. `commits` are the mirror's two commits.
+ */
+async function twoCheckpointRepo() {
+  const repo = checkpointMirror();
+  return { ...repo, commits: [await repo.adopt(3, tsAt(30)), await repo.adopt(5, tsAt(40))] };
+}
+
+test('every checkpoint the snapshot holds gets its record, not only the newest: two adopted in two mirror runs are recorded in one run and one commit, and a snapshot that holds only the first records only the first', async () => {
+  const names = ['20261001T000030Z_3', '20261001T000040Z_5'];
+  const records = names.map((n) => `checkpoints/${n}.swh.json`);
+
+  const both = await twoCheckpointRepo();
+  const main = both.git('rev-parse', 'HEAD');
+  assert.deepEqual(both.git('ls-tree', '--name-only', main, 'checkpoints/').split('\n'), names.map((n) => `checkpoints/${n}.jws`), 'two checkpoints and no record yet');
+  assert.equal(JSON.parse(readFileSync(join(both.dir, 'ct/checkpoint-latest.json'), 'utf8')).payload.headSeq, 5, 'the latest pointer moved to the second');
+  const out = await archive(both.dir, fakeSwh(both.dir));
+  assert.equal(out.status, 'covered');
+  assert.deepEqual(out.records.map((r) => r.file), records);
+  for (const name of names) {
+    assert.deepEqual(JSON.parse(readFileSync(join(both.dir, `checkpoints/${name}.swh.json`), 'utf8')), {
+      checkpoint: `checkpoints/${name}.jws`,
+      origin_url: ORIGIN_URL,
+      snapshot_swhid: `swh:1:snp:${snapHex(main)}`,
+      visit_date: '2026-10-06T10:41:12.123456+00:00',
+      visit_status: 'full',
+      save_request_id: 1000,
+      save_request_url: 'https://archive.softwareheritage.org/api/1/origin/save/1000/',
+      mirror_commit: main,
+    });
+  }
+  assert.equal(both.git('rev-parse', 'HEAD~1'), main, 'one record commit on the mirror\'s');
+  assert.deepEqual(both.git('show', '--name-only', '--format=', 'HEAD').split('\n'), records);
+  assert.deepEqual(both.git('log', '-1', '--format=%b').split('\n').map((l) => /^Record: (\S+) /.exec(l)?.[1]), records, 'one Record: line per file');
+
+  // An older full visit (the webhook's, or a revisit) whose main is the mirror's first commit:
+  // the record of the one checkpoint it holds, and none for the second, which waits for a
+  // snapshot that holds it (this run's own save is still in flight).
+  const older = await twoCheckpointRepo();
+  const first = older.commits[0];
+  const hex = snapHex(first);
+  assert.equal(older.git('ls-tree', '--name-only', first, 'checkpoints/'), `checkpoints/${names[0]}.jws`);
+  const late = await archive(older.dir, fakeSwh(older.dir, { latestVisit: { status: 'full', snapshot: hex, date: '2026-10-06T10:00:00+00:00' }, snapshots: new Map([[hex, first]]), pollsToFinish: 1000 }));
+  assert.deepEqual(late.records.map((r) => r.file), [records[0]]);
+  assert.equal(existsSync(join(older.dir, records[1])), false);
+  const record = JSON.parse(readFileSync(join(older.dir, records[0]), 'utf8'));
+  assert.equal(record.snapshot_swhid, `swh:1:snp:${hex}`);
+  assert.equal(record.mirror_commit, first);
+  assert.equal(record.save_request_id, null);
+});
+
+test('every checkpoint the snapshot holds gets its record, in the steady state too: a checkpoint adopted on top of a recorded one is recorded in one record commit, and the earlier record is left byte for byte', async () => {
+  const names = ['20261001T000030Z_3', '20261001T000040Z_5'];
+  const records = names.map((n) => `checkpoints/${n}.swh.json`);
+  const repo = checkpointMirror();
+  const swh = fakeSwh(repo.dir);
+
+  // The mirror adopts the first checkpoint, and an archive run records it in its own commit.
+  // Its save finishes within the run, so no request is left in flight for the next one.
+  const first = await repo.adopt(3, tsAt(30));
+  assert.deepEqual((await archive(repo.dir, swh)).records.map((r) => r.file), [records[0]]);
+  assert.equal(repo.git('rev-parse', 'HEAD~1'), first);
+  assert.equal(existsSync(join(repo.dir, 'swh/state.json')), false);
+  const recordCommit = repo.git('rev-parse', 'HEAD');
+  const kept = readFileSync(join(repo.dir, records[0]));
+
+  // The mirror adopts the second on top. main's checkpoints/ lists, by name, the first .jws,
+  // its record, then the second .jws: neither the record already there nor a file that is not
+  // a .jws may end the walk before the second.
+  const main = await repo.adopt(5, tsAt(40));
+  assert.equal(repo.git('rev-parse', 'HEAD~1'), recordCommit);
+  assert.deepEqual(repo.git('ls-tree', '--name-only', main, 'checkpoints/').split('\n'), [`checkpoints/${names[0]}.jws`, records[0], `checkpoints/${names[1]}.jws`]);
+
+  // The next archive run: the latest full visit is the first save's, which holds only the first
+  // checkpoint; this run's own save, request 1001, captures main.
+  const out = await archive(repo.dir, swh);
+  assert.equal(out.status, 'covered');
+  assert.equal(out.requests, 1);
+  assert.deepEqual(out.records.map((r) => r.file), [records[1]]);
+  assert.deepEqual(JSON.parse(readFileSync(join(repo.dir, records[1]), 'utf8')), {
+    checkpoint: `checkpoints/${names[1]}.jws`,
+    origin_url: ORIGIN_URL,
+    snapshot_swhid: `swh:1:snp:${snapHex(main)}`,
+    visit_date: '2026-10-06T10:41:12.123456+00:00',
+    visit_status: 'full',
+    save_request_id: 1001,
+    save_request_url: 'https://archive.softwareheritage.org/api/1/origin/save/1001/',
+    mirror_commit: main,
+  });
+  assert.ok(readFileSync(join(repo.dir, records[0])).equals(kept), 'the earlier record is left byte for byte');
+  assert.equal(repo.git('rev-parse', 'HEAD~1'), main, 'one record commit on the mirror\'s');
+  assert.deepEqual(repo.git('show', '--name-only', '--format=', 'HEAD').split('\n'), [records[1]]);
+  assert.deepEqual(repo.git('log', '-1', '--format=%b').split('\n').map((l) => /^Record: (\S+) /.exec(l)?.[1]), [records[1]], 'one Record: line');
 });
 
 test('correction 14: a save that succeeds without capturing the commit gets one new request, and no more than one per run', async () => {
